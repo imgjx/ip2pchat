@@ -1,53 +1,62 @@
 # iP2P Chat
 
-**多协议冗余P2P加密聊天室 | 抗审查 · 端到端加密 · 零服务器**
+**多协议冗余P2P加密聊天室 | 端到端加密 · 零服务器 · 单HTML文件**
 
-[![在线访问](https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E8%AE%BF%E9%97%AE-ip2pchat.top-brightgreen)](https://ip2pchat.top)
+[![在线访问](https://img.shields.io/badge/在线访问-ip2pchat.top-brightgreen)](https://ip2pchat.top)
 
 ## 项目简介
 
-基于 [webconnect.js](https://webconnect.js.org) 构建的纯前端P2P加密聊天应用。单HTML文件，无需安装，打开即用。
+这是一个基于 [webconnect.js](https://webconnect.js.org) 构建的纯前端P2P加密聊天演示应用。单个HTML文件即可运行，无需安装任何软件。
 
-## webconnect.js 是什么？
+webconnect.js 是一个优秀的P2P连接库，它同时集成了 **WebTorrent、MQTT、Nostr** 三种去中心化网络协议作为信令通道，使浏览器之间可以通过WebRTC直接建立连接，无需中心服务器。
 
-**[webconnect.js](https://webconnect.js.org) 是一个强大的多协议P2P连接库**，它同时集成了三种去中心化网络协议：
+## 本项目实现的功能
 
-- **WebTorrent** - DHT网络
-- **MQTT** - 消息队列协议  
-- **Nostr** - 去中心化社交协议
+在 webconnect.js 的基础上，本项目添加了：
 
-这个库太NB了！它让P2P通信不再依赖单一信令服务器，三种协议冗余备份，任意一种被封锁都能自动切换。WebRTC + 三重协议 = 无敌穿透能力！
+- **端到端加密**：使用 AES-GCM 对消息进行加密，ECDSA 进行身份签名
+- **身份管理系统**：本地生成加密后的身份指纹，支持导出/导入
+- **图片传输**：图片压缩后加密发送
+- **多语言界面**：支持中文、英文、日语、俄语
+- **在线成员列表**：实时显示房间内在线用户
 
-## iP2P Chat 做了什么
+## 技术特点
 
-在 webconnect.js 基础上增加了：
-
-- **端到端加密**：AES-GCM + ECDSA签名
-- **身份系统**：本地生成加密指纹，可导出/导入
-- **图片传输**：压缩后加密发送
-- **多语言界面**：中/英/日/俄
-
-## 核心优势
-
-| 特性 | 说明 |
-|------|------|
-| 📁 单HTML | 一个文件搞定，无依赖 |
-| 🚫 无服务器 | 纯P2P，无中间人可以封杀 |
-| 🔐 E2EE | 端到端加密，只有你们能看 |
-| 🌐 多协议 | WebTorrent + MQTT + Nostr |
-| 🔓 无历史 | 隐私设计，不留痕迹 |
-| 🧬 可导出身份 | 指纹可备份，换设备不换身份 |
+- **无服务器**：纯P2P架构，没有中心节点可以封禁
+- **多协议冗余**：同时使用三种信令协议，单一协议被封不影响连接
+- **无历史消息**：端到端加密设计，服务器端不存储任何聊天记录
+- **MIT许可证**：完全开源，可自由使用和修改
 
 ## 技术栈
 
-- [webconnect.js](https://webconnect.js.org) - 多协议P2P通信引擎
-- WebRTC - 浏览器点对点连接
-- AES-GCM - 消息加密
-- ECDSA - 身份签名验证
+| 组件 | 说明 |
+|------|------|
+| [webconnect.js](https://webconnect.js.org) | 多协议P2P通信引擎 |
+| WebRTC | 浏览器点对点连接 |
+| AES-GCM | 消息加密 |
+| ECDSA | 身份签名验证 |
 
 ## 在线体验
 
 [https://ip2pchat.top](https://ip2pchat.top)
+
+## 本地运行
+
+```bash
+# 直接下载 HTML 文件，双击即可在浏览器中打开
+# 或使用本地服务器
+npx serve .
+```
+
+## 许可证
+
+MIT License
+
+## 关于项目
+
+⚠️ **仅供学习交流使用**
+
+本项目是一个技术演示，展示了如何在浏览器中实现去中心化P2P加密通信。如果你需要稳定可靠的通信工具，建议使用 Signal、Wire 等成熟的端到端加密通信软件。
 
 ---
 
