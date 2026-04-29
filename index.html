@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>iP2P Chat | Private Anti-Censorship Chat Room</title>
+    <title>iP2P Chat | P2P Encrypted Chat Room</title>
     <script src="https://cdn.jsdelivr.net/npm/webconnect@0.0.12/dist/umd/webconnect.js" integrity="sha384-M1azZeEwSdypFWUDssc6i+zAd/S7MDK/LpsJgPpLpxezak/YrvlMy7VZkKhhg6AY" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/imgjx/ip2pchat@master/static/css/v0d00.css">
 </head>
 <body>
 <div class="app-wrapper">
-    <div id="offlineBanner" class="offline-banner" style="display:none;">⚠️ Network disconnected</div>
     <header class="app-header">
         <div class="logo-area"><h1>🔒 iP2P Chat</h1><p id="headerNotice">本程序仅用于webconnect浏览器js库学习使用，请遵守当地法律！</p></div>
         <div class="lang-selector">
@@ -50,11 +49,12 @@
                 </div>
                 <div class="chat-container">
                     <div id="messagesList" class="messages-area"></div>
-                    <div class="input-area">
-                        <textarea id="messageInput" rows="2" placeholder="输入消息... Ctrl+Enter 发送"></textarea>
-                        <div class="toolbar">
-                            <label class="btn btn-sm" style="cursor:pointer;">📎 <span id="imageBtnText">图片</span><input type="file" id="imageInput" accept="image/*" style="display:none;"></label>
-                            <button id="sendMsgBtn" class="btn btn-sm"><span id="sendBtnText">发送</span></button>
+                    <div class="input-area" style="flex-direction: column; align-items: stretch;">
+                        <textarea id="messageInput" rows="2" placeholder="输入消息... Ctrl+Enter 发送" style="width:100%; margin-bottom:8px;"></textarea>
+                        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                            <button id="privateMsgBtn" class="btn btn-sm" style="margin:0;"><span id="privateBtnText">单点消息</span></button>
+                            <label class="btn btn-sm" style="cursor:pointer; margin:0;"><span id="imageBtnText">发送图片</span><input type="file" id="imageInput" accept="image/*" style="display:none;"></label>
+                            <button id="sendMsgBtn" class="btn btn-sm" style="margin:0;"><span id="sendBtnText">发送消息</span></button>
                         </div>
                     </div>
                 </div>
@@ -62,78 +62,108 @@
             <div class="online-sidebar"><div class="sidebar-header" id="sidebarHeaderText">👥 在线成员列表</div><div id="usersListContainer" class="users-list"></div></div>
         </div>
     </main>
-    <footer class="app-footer"><span id="footerText">⚡ iP2P Chat | 抗审查 | 无服务器 | 私密聊天</span></footer>
+    <footer class="app-footer"><span id="footerText">⚡ iP2P Chat | 私密通信 | 零服务器 | 端到端加密</span></footer>
 </div>
 
 <script>
-    // 等待 webconnect 加载完成
+    // iP2P Chat | 作者 imgjx | 本程序仅用于webconnect浏览器js库学习使用，请遵守当地法律！使用本程序非法行为与作者无关！
+    console.log("iP2P Chat | 作者 imgjx | 本程序仅用于webconnect浏览器js库学习使用，请遵守当地法律！使用本程序非法行为与作者无关！");
+    
     window.addEventListener('load', function() {
         if (typeof webconnect === 'undefined') {
             console.error('webconnect not loaded');
             return;
         }
         
-        // 检测网络状态变化
-        function updateOfflineStatus() {
-            const banner = document.getElementById('offlineBanner');
-            if (!navigator.onLine) {
-                banner.style.display = 'block';
-                banner.classList.add('show');
-            } else {
-                banner.style.display = 'none';
-                banner.classList.remove('show');
-            }
-        }
-        window.addEventListener('online', updateOfflineStatus);
-        window.addEventListener('offline', updateOfflineStatus);
-        updateOfflineStatus();
-        
         if (!window.isSecureContext) {
-            alert("⚠️ Security Error: This application requires HTTPS or localhost for cryptographic operations.");
+            alert("⚠️ Security Error: This application requires HTTPS or localhost.");
             throw new Error("Insecure context");
         }
         
         // ==================== 加密参数 ====================
-        const ROOM_KEY_ITERATIONS = 2000000;
+        const ROOM_ID_PBKDF2_ITERATIONS = 5000;
         const FINGERPRINT_ITERATIONS = 3000000;
+        const MASTER_KEY_ITERATIONS = 200000;
         const KEY_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*:;?=";
         const MAX_MESSAGES = 500;
         const UNLOAD_THRESHOLD = 300;
+        const IMGJX_SALT = "imgjx_ip2pchat_salt_v3";
         
-        function generate96BitKey() {
+        // 生成128位房间密钥
+        function generate128BitRoomKey() {
             let key = '';
-            const arr = crypto.getRandomValues(new Uint8Array(96));
-            for (let i = 0; i < 96; i++) key += KEY_CHARSET[arr[i] % KEY_CHARSET.length];
+            const arr = crypto.getRandomValues(new Uint8Array(128));
+            for (let i = 0; i < 128; i++) key += KEY_CHARSET[arr[i] % KEY_CHARSET.length];
             return key;
         }
         
-        function parse96KeyToRoomParams(key96) {
-            if (key96.length !== 96) throw new Error('密钥必须为96位');
-            const part1 = key96.slice(0,48).replace(/[^A-Za-z0-9]/g, 'A');
-            const part2 = key96.slice(48,96).replace(/[^A-Za-z0-9]/g, 'B');
-            const appName = "ip2pchat";
-            const channelName = "Room_" + part2.slice(0,16);
-            const password = key96.slice(24,56).replace(/[^A-Za-z0-9]/g, 'C') + "p2p";
-            return { appName, channelName, password };
+        // PBKDF2 派生函数
+        async function pbkdf2Derive(input, salt, iterations, outputLength = 32) {
+            const enc = new TextEncoder();
+            const baseKey = await crypto.subtle.importKey('raw', enc.encode(input), { name: 'PBKDF2' }, false, ['deriveBits']);
+            const derivedBits = await crypto.subtle.deriveBits(
+                { name: 'PBKDF2', salt: enc.encode(salt), iterations: iterations, hash: 'SHA-256' },
+                baseKey,
+                outputLength * 8
+            );
+            return Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
         }
         
-        async function deriveKeyFromPassword(password, salt, iterations) {
+        // 根据房间密钥派生房间ID和连接参数
+        async function deriveRoomParamsFromKey(roomKey) {
+            if (roomKey.length !== 128) throw new Error('房间密钥必须为128位');
+            
+            // 提取指定位置字符: 第2~6位(索引1-5)，9,10,12,22,33,44,55,66,77,88,95
+            const positions = [1,2,3,4,5, 8,9, 11, 21, 32, 43, 54, 65, 76, 87, 94];
+            let roomSeed = '';
+            for (let pos of positions) {
+                if (pos < roomKey.length) roomSeed += roomKey[pos];
+            }
+            // 使用 PBKDF2 派生5000次，取前48字符
+            const roomIdFull = await pbkdf2Derive(roomSeed, IMGJX_SALT + '_roomid', ROOM_ID_PBKDF2_ITERATIONS, 48);
+            const roomIdPart = roomIdFull.slice(0, 48);
+            
+            // 提取房间密钥第24~32字符（索引23-31）
+            const aesSeedPart = roomKey.slice(23, 32);
+            // 对aesSeedPart进行SHA-256，取32~60位
             const enc = new TextEncoder();
+            const aesSeedHashBuf = await crypto.subtle.digest('SHA-256', enc.encode(aesSeedPart + IMGJX_SALT));
+            const aesSeedHashArray = Array.from(new Uint8Array(aesSeedHashBuf));
+            const aesSeedHashStr = aesSeedHashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            const aesPart = aesSeedHashStr.slice(32, 60);
+            
+            // 从房间密钥派生临时AES密钥取最后4字符（可提取用于导出）
+            const tempAesKey = await deriveKeyFromPassword(roomKey, 'RoomKeyTemp', 1000, true);
+            const tempAesKeyBuf = await crypto.subtle.exportKey('raw', tempAesKey);
+            const tempAesKeyArray = Array.from(new Uint8Array(tempAesKeyBuf));
+            const last4Chars = tempAesKeyArray.slice(-4).map(b => KEY_CHARSET[b % KEY_CHARSET.length]).join('');
+            
+            const finalRoomId = roomIdPart;
+            const channelName = "Room_" + finalRoomId.slice(0, 12);
+            const connectPassword = aesPart + last4Chars;
+            const appName = "ip2pchat_imgjx";
+            
+            return { appName, channelName, password: connectPassword, roomId: finalRoomId };
+        }
+        
+        async function deriveKeyFromPassword(password, salt, iterations, extractable = false) {
+            const enc = new TextEncoder();
+            const fullSalt = IMGJX_SALT + salt;
             const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
             return await crypto.subtle.deriveKey(
-                { name: 'PBKDF2', salt: enc.encode(salt), iterations, hash: 'SHA-256' },
+                { name: 'PBKDF2', salt: enc.encode(fullSalt), iterations: iterations, hash: 'SHA-256' },
                 baseKey,
                 { name: 'AES-GCM', length: 256 },
-                false,
+                extractable,
                 ['encrypt', 'decrypt']
             );
         }
         
-        async function deriveAesKeyFrom96(key96) {
-            return await deriveKeyFromPassword(key96, 'P2P-Chat-Salt-V5-96', ROOM_KEY_ITERATIONS);
+        async function deriveAesKeyFromRoomKey(roomKey) {
+            return await deriveKeyFromPassword(roomKey, 'P2P-Chat-Master-V2', MASTER_KEY_ITERATIONS, false);
         }
         
-        // ==================== 用户级非对称加密 ====================
+        // ==================== 用户级非对称加密 (ECDH) ====================
         async function generateUserKeyPair() {
             return await crypto.subtle.generateKey(
                 { name: 'ECDH', namedCurve: 'P-256' },
@@ -156,22 +186,21 @@
                 myPrivateKey,
                 256
             );
-            const sharedKey = await crypto.subtle.importKey(
+            return await crypto.subtle.importKey(
                 'raw',
                 sharedSecret,
                 { name: 'AES-GCM', length: 256 },
                 false,
                 ['encrypt', 'decrypt']
             );
-            return sharedKey;
         }
         
         // ==================== 多语言 ====================
         const translations = {
-            en: { headerNotice: "This program is for webconnect browser JS library learning only. Please comply with local laws!", createRoom: "Create Room", joinRoom: "Join Room", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Enter 96-digit Invite Key", keyHelper: "Key length 96, includes digits/letters/special chars", confirmJoin: "Confirm Join", back: "Back", leaveBtn: "Leave", inviteLabel: "🔑 Room Key", copyBtn: "Copy Key", imageBtn: "Image", sendBtn: "Send", sidebarHeader: "👥 Online Members List", footerText: "⚡ iP2P Chat | Anti-Censorship | Serverless | Private Chat", channelReady: "✅ P2P encrypted transmission channel started successfully", historyWarning: "ℹ️ Newly joined users cannot see previous messages (end-to-end encryption).", system: "System", offlineMsg: "Network disconnected", copySuccess: "Copied!", invalidKey: "Invalid key length (must be 96 characters)", changeNickname: "Change Nickname", newNickname: "New nickname:", replyAttack: "Replay attack detected", sigInvalid: "Signature invalid", joined: "joined the room", left: "left the room", inputPlaceholder: "Type message... Ctrl+Enter to send", exportFp: "Export Fingerprint", viewFullFp: "Full fingerprint: ", generating: "Generating...", exportPassword: "Set export password", confirmExportPassword: "Confirm export password", passwordMismatch: "Passwords do not match", importFailed: "Import failed: wrong password or corrupted file", compressing: "Compressing image...", myFingerprint: "My Fingerprint", close: "Close", importFingerprint: "Import fingerprint (optional)", importPassword: "Import password", identitySetup: "Set Your Identity", nicknamePlaceholder: "Nickname", enterRoom: "Enter Room", derivingKey: "Deriving room key...", processing: "Processing...", clearFile: "Clear", exportSuccess: "Fingerprint exported", onlinePrefix: "👥 Online: ", onlineSuffix: "", fingerprintCopied: "Fingerprint copied to clipboard", loadMore: "Load more messages...", copyFingerprint: "Copy fingerprint", leavingRoom: "Leaving room...", creatingRoom: "Creating room...", joiningRoom: "Joining room...", keyRotated: "User encryption key rotated" },
-            zh: { headerNotice: "本程序仅用于webconnect浏览器js库学习使用，请遵守当地法律！", createRoom: "创建房间", joinRoom: "加入房间", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 输入96位邀请密钥", keyHelper: "密钥长度96，包含数字/大小写字母/特殊符号", confirmJoin: "确认加入", back: "返回", leaveBtn: "退出", inviteLabel: "🔑 房间密钥", copyBtn: "复制密钥", imageBtn: "图片", sendBtn: "发送", sidebarHeader: "👥 在线成员列表", footerText: "⚡ iP2P Chat | 抗审查 | 无服务器 | 私密聊天", channelReady: "✅ P2P加密传输信道启动成功", historyWarning: "ℹ️ 新加入的用户无法看到历史消息（端到端加密特性）", system: "系统", offlineMsg: "网络已断开", copySuccess: "已复制", invalidKey: "无效的密钥长度（必须为96位）", changeNickname: "修改昵称", newNickname: "新昵称:", replyAttack: "检测到重放攻击", sigInvalid: "签名验证失败", joined: "加入房间", left: "离开房间", inputPlaceholder: "输入消息... Ctrl+Enter 发送", exportFp: "导出指纹", viewFullFp: "完整指纹: ", generating: "正在生成...", exportPassword: "设置导出密码", confirmExportPassword: "确认导出密码", passwordMismatch: "两次输入的密码不一致", importFailed: "导入失败：密码错误或文件损坏", compressing: "压缩图片中...", myFingerprint: "我的指纹", close: "关闭", importFingerprint: "导入指纹（可选）", importPassword: "导入密码", identitySetup: "设置你的身份", nicknamePlaceholder: "昵称", enterRoom: "进入房间", derivingKey: "正在派生房间密钥...", processing: "处理中...", clearFile: "清除", exportSuccess: "指纹已导出", onlinePrefix: "👥 在线: ", onlineSuffix: "人", fingerprintCopied: "指纹已复制到剪贴板", loadMore: "加载更多消息...", copyFingerprint: "复制指纹", leavingRoom: "正在退出房间...", creatingRoom: "正在创建房间...", joiningRoom: "正在加入房间...", keyRotated: "用户加密密钥已更换" },
-            ja: { headerNotice: "このプログラムはwebconnectブラウザJSライブラリの学習のみを目的としています。現地の法律を遵守してください！", createRoom: "ルーム作成", joinRoom: "ルーム参加", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 96桁の招待キーを入力", keyHelper: "キー長96、数字/英字/特殊文字を含む", confirmJoin: "参加確認", back: "戻る", leaveBtn: "退出", inviteLabel: "🔑 ルームキー", copyBtn: "キーをコピー", imageBtn: "画像", sendBtn: "送信", sidebarHeader: "👥 オンラインメンバーリスト", footerText: "⚡ iP2P Chat | 検閲耐性 | サーバーレス | プライベートチャット", channelReady: "✅ P2P暗号化伝送チャンネルが正常に起動しました", historyWarning: "ℹ️ 新しく参加したユーザーは過去のメッセージを表示できません（エンドツーエンド暗号化）", system: "システム", offlineMsg: "ネットワークが切断されました", copySuccess: "コピーしました", invalidKey: "無効なキー長（96文字必要）", changeNickname: "ニックネーム変更", newNickname: "新しいニックネーム:", replyAttack: "リプレイ攻撃を検出", sigInvalid: "署名が無効です", joined: "ルームに参加しました", left: "ルームを退出しました", inputPlaceholder: "メッセージを入力... Ctrl+Enterで送信", exportFp: "指紋をエクスポート", viewFullFp: "完全な指紋: ", generating: "生成中...", exportPassword: "エクスポートパスワードを設定", confirmExportPassword: "パスワードを確認", passwordMismatch: "パスワードが一致しません", importFailed: "インポート失敗：パスワード誤りまたはファイル破損", compressing: "画像を圧縮中...", myFingerprint: "私の指紋", close: "閉じる", importFingerprint: "指紋をインポート（オプション）", importPassword: "インポートパスワード", identitySetup: "身元を設定", nicknamePlaceholder: "ニックネーム", enterRoom: "ルームに入る", derivingKey: "ルームキーを派生中...", processing: "処理中...", clearFile: "クリア", exportSuccess: "指紋をエクスポートしました", onlinePrefix: "👥 オンライン: ", onlineSuffix: "人", fingerprintCopied: "指紋をクリップボードにコピーしました", loadMore: "もっとメッセージを読み込む...", copyFingerprint: "指紋をコピー", leavingRoom: "ルームを退出中...", creatingRoom: "ルームを作成中...", joiningRoom: "ルームに参加中...", keyRotated: "ユーザー暗号鍵を交換しました" },
-            ru: { headerNotice: "Эта программа предназначена только для изучения библиотеки webconnect. Пожалуйста, соблюдайте местные законы!", createRoom: "Создать комнату", joinRoom: "Присоединиться", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Введите 96-значный ключ", keyHelper: "Длина ключа 96, включает цифры/буквы/спецсимволы", confirmJoin: "Подтвердить", back: "Назад", leaveBtn: "Выйти", inviteLabel: "🔑 Ключ комнаты", copyBtn: "Копировать ключ", imageBtn: "Изображение", sendBtn: "Отправить", sidebarHeader: "👥 Список участников", footerText: "⚡ iP2P Chat | Анти-цензура | Без сервера | Приватный чат", channelReady: "✅ P2P защищенный канал запущен", historyWarning: "ℹ️ Новые пользователи не видят историю сообщений (сквозное шифрование)", system: "Система", offlineMsg: "Сеть отключена", copySuccess: "Скопировано!", invalidKey: "Неверная длина ключа (96 символов)", changeNickname: "Сменить ник", newNickname: "Новый ник:", replyAttack: "Обнаружена атака повтора", sigInvalid: "Неверная подпись", joined: "присоединился к комнате", left: "покинул комнату", inputPlaceholder: "Введите сообщение... Ctrl+Enter", exportFp: "Экспорт отпечатка", viewFullFp: "Полный отпечаток: ", generating: "Генерация...", exportPassword: "Установить пароль", confirmExportPassword: "Подтвердите пароль", passwordMismatch: "Пароли не совпадают", importFailed: "Ошибка импорта: неверный пароль или поврежденный файл", compressing: "Сжатие изображения...", myFingerprint: "Мой отпечаток", close: "Закрыть", importFingerprint: "Импорт отпечатка", importPassword: "Пароль импорта", identitySetup: "Настройка личности", nicknamePlaceholder: "Ник", enterRoom: "Войти", derivingKey: "Вывод ключа комнаты...", processing: "Обработка...", clearFile: "Очистить", exportSuccess: "Отпечаток экспортирован", onlinePrefix: "👥 Онлайн: ", onlineSuffix: "", fingerprintCopied: "Отпечаток скопирован", loadMore: "Загрузить еще...", copyFingerprint: "Копировать отпечаток", leavingRoom: "Выход из комнаты...", creatingRoom: "Создание комнаты...", joiningRoom: "Присоединение...", keyRotated: "Ключ шифрования пользователя обновлен" }
+            en: { headerNotice: "This program is for webconnect browser JS library learning only. Please comply with local laws!", createRoom: "Create Room", joinRoom: "Join Room", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Enter 128-digit Room Key", keyHelper: "Key length 128", confirmJoin: "Confirm Join", back: "Back", leaveBtn: "Leave", inviteLabel: "🔑 Room Key", copyBtn: "Copy Key", imageBtn: "Send Image", sendBtn: "Send Message", privateBtn: "Private Msg", sidebarHeader: "👥 Online Members List", footerText: "⚡ iP2P Chat | Private Communication | Zero Server | E2EE", channelReady: "✅ P2P encrypted channel started", historyWarning: "ℹ️ New users cannot see previous messages (E2EE).", system: "System", copySuccess: "Copied!", invalidKey: "Invalid key length (must be 128 chars)", changeNickname: "Change Nickname", newNickname: "New nickname:", replyAttack: "Replay attack detected", sigInvalid: "Signature invalid", joined: "joined", left: "left", inputPlaceholder: "Type message... Ctrl+Enter", exportFp: "Export", viewFullFp: "Full fingerprint: ", generating: "Generating...", exportPassword: "Set export password", confirmExportPassword: "Confirm password", passwordMismatch: "Passwords do not match", importFailed: "Import failed", compressing: "Compressing...", myFingerprint: "My Fingerprint", close: "Close", importFingerprint: "Import fingerprint", importPassword: "Import password", identitySetup: "Set Your Identity", nicknamePlaceholder: "Nickname", enterRoom: "Enter Room", derivingKey: "Deriving room key...", processing: "Processing...", clearFile: "Clear", exportSuccess: "Exported", onlinePrefix: "👥 Online: ", onlineSuffix: "", fingerprintCopied: "Fingerprint copied", loadMore: "Load more...", copyFingerprint: "Copy", leavingRoom: "Leaving...", creatingRoom: "Creating...", joiningRoom: "Joining...", privateMsgTitle: "Send Private Message", privateMsgInput: "Enter recipient's full fingerprint (64 hex chars):", privateMsgPlaceholder: "Paste full 64-character fingerprint here", privateMsgContent: "Message content:", sendPrivate: "Send", privateSent: "Private message sent to", privateNotFound: "User not found with that fingerprint" },
+            zh: { headerNotice: "本程序仅用于webconnect浏览器js库学习使用，请遵守当地法律！", createRoom: "创建房间", joinRoom: "加入房间", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 输入128位房间密钥", keyHelper: "密钥长度128", confirmJoin: "确认加入", back: "返回", leaveBtn: "退出", inviteLabel: "🔑 房间密钥", copyBtn: "复制密钥", imageBtn: "发送图片", sendBtn: "发送消息", privateBtn: "单点消息", sidebarHeader: "👥 在线成员列表", footerText: "⚡ iP2P Chat | 私密通信 | 零服务器 | 端到端加密", channelReady: "✅ P2P加密信道启动成功", historyWarning: "ℹ️ 新加入的用户无法看到历史消息（端到端加密）", system: "系统", copySuccess: "已复制", invalidKey: "无效的密钥长度（必须为128位）", changeNickname: "修改昵称", newNickname: "新昵称:", replyAttack: "检测到重放攻击", sigInvalid: "签名验证失败", joined: "加入房间", left: "离开房间", inputPlaceholder: "输入消息... Ctrl+Enter 发送", exportFp: "导出指纹", viewFullFp: "完整指纹: ", generating: "正在生成...", exportPassword: "设置导出密码", confirmExportPassword: "确认导出密码", passwordMismatch: "两次输入的密码不一致", importFailed: "导入失败", compressing: "压缩图片中...", myFingerprint: "我的指纹", close: "关闭", importFingerprint: "导入指纹（可选）", importPassword: "导入密码", identitySetup: "设置你的身份", nicknamePlaceholder: "昵称", enterRoom: "进入房间", derivingKey: "正在派生房间密钥...", processing: "处理中...", clearFile: "清除", exportSuccess: "指纹已导出", onlinePrefix: "👥 在线: ", onlineSuffix: "人", fingerprintCopied: "指纹已复制", loadMore: "加载更多...", copyFingerprint: "复制指纹", leavingRoom: "正在退出...", creatingRoom: "正在创建...", joiningRoom: "正在加入...", privateMsgTitle: "发送单点消息", privateMsgInput: "输入接收者的完整指纹（64位十六进制）:", privateMsgPlaceholder: "粘贴完整的64位指纹", privateMsgContent: "消息内容:", sendPrivate: "发送", privateSent: "单点消息已发送至", privateNotFound: "未找到该指纹的用户" },
+            ja: { headerNotice: "学習用プログラム", createRoom: "作成", joinRoom: "参加", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 128桁ルームキー入力", keyHelper: "128文字", confirmJoin: "参加", back: "戻る", leaveBtn: "退出", inviteLabel: "🔑 ルームキー", copyBtn: "コピー", imageBtn: "画像送信", sendBtn: "送信", privateBtn: "個別", sidebarHeader: "👥 メンバーリスト", footerText: "⚡ iP2P Chat | プライベート通信 | ゼロサーバー | E2EE", channelReady: "✅ P2P暗号化チャネル起動", historyWarning: "ℹ️ 過去メッセージは見えません", system: "システム", copySuccess: "完了", invalidKey: "無効なキー長（128文字）", changeNickname: "変更", newNickname: "新名前:", replyAttack: "リプレイ攻撃", sigInvalid: "署名無効", joined: "参加", left: "退出", inputPlaceholder: "メッセージ... Ctrl+Enter", exportFp: "エクスポート", viewFullFp: "完全な指紋: ", generating: "生成中...", exportPassword: "パスワード設定", confirmExportPassword: "確認", passwordMismatch: "不一致", importFailed: "失敗", compressing: "圧縮中...", myFingerprint: "指紋", close: "閉じる", importFingerprint: "インポート", importPassword: "パスワード", identitySetup: "設定", nicknamePlaceholder: "名前", enterRoom: "入室", derivingKey: "キー導出中...", processing: "処理中...", clearFile: "クリア", exportSuccess: "完了", onlinePrefix: "👥 オンライン: ", onlineSuffix: "人", fingerprintCopied: "指紋コピー", loadMore: "もっと読み込む...", copyFingerprint: "コピー", leavingRoom: "退出中...", creatingRoom: "作成中...", joiningRoom: "参加中...", privateMsgTitle: "個別メッセージ", privateMsgInput: "受信者の完全な指紋（64桁）:", privateMsgPlaceholder: "64桁の指紋を貼り付け", privateMsgContent: "メッセージ内容:", sendPrivate: "送信", privateSent: "送信先", privateNotFound: "指紋が見つかりません" },
+            ru: { headerNotice: "Для изучения webconnect", createRoom: "Создать", joinRoom: "Войти", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Введите 128-значный ключ комнаты", keyHelper: "128 символов", confirmJoin: "Войти", back: "Назад", leaveBtn: "Выйти", inviteLabel: "🔑 Ключ комнаты", copyBtn: "Копировать", imageBtn: "Изо", sendBtn: "Отпр", privateBtn: "Приват", sidebarHeader: "👥 Список", footerText: "⚡ iP2P Chat | Приватная связь | Ноль серверов | E2EE", channelReady: "✅ P2P канал запущен", historyWarning: "ℹ️ История недоступна", system: "Система", copySuccess: "Скопировано", invalidKey: "Неверная длина ключа (128)", changeNickname: "Сменить ник", newNickname: "Новый ник:", replyAttack: "Атака повтора", sigInvalid: "Неверная подпись", joined: "присоединился", left: "покинул", inputPlaceholder: "Сообщение... Ctrl+Enter", exportFp: "Экспорт", viewFullFp: "Полный отпечаток: ", generating: "Генерация...", exportPassword: "Пароль", confirmExportPassword: "Подтвердите", passwordMismatch: "Не совпадают", importFailed: "Ошибка", compressing: "Сжатие...", myFingerprint: "Отпечаток", close: "Закрыть", importFingerprint: "Импорт", importPassword: "Пароль", identitySetup: "Настройка", nicknamePlaceholder: "Ник", enterRoom: "Войти", derivingKey: "Вывод ключа...", processing: "Обработка...", clearFile: "Очистить", exportSuccess: "Экспорт", onlinePrefix: "👥 Онлайн: ", onlineSuffix: "", fingerprintCopied: "Отпечаток скопирован", loadMore: "Загрузить...", copyFingerprint: "Копировать", leavingRoom: "Выход...", creatingRoom: "Создание...", joiningRoom: "Вход...", privateMsgTitle: "Приватное сообщение", privateMsgInput: "Полный отпечаток получателя:", privateMsgPlaceholder: "Вставьте 64-значный отпечаток", privateMsgContent: "Текст сообщения:", sendPrivate: "Отправить", privateSent: "Отправлено", privateNotFound: "Пользователь не найден" }
         };
         let currentLang = 'zh';
         function t(key) { return translations[currentLang][key] || translations.zh[key] || key; }
@@ -196,7 +225,7 @@
         }
         
         function showFingerprintDialog(title, fingerprint, showExport = false, onExport = null) {
-            const content = `<h3>${title}</h3><div class="full-hash" style="word-break:break-all; white-space:normal;">${escapeHtml(fingerprint)}</div><div class="modal-buttons">${showExport ? '<button class="btn" id="fpExportBtn" style="flex:1">📁 ' + t('exportFp') + '</button>' : ''}<button class="btn modal-cancel" style="flex:1">${t('close')}</button></div>`;
+            const content = `<h3>${title}</h3><div class="full-hash" style="word-break:break-all; white-space:normal; font-family:monospace; font-size:0.7rem; background:#f9fbf9; padding:12px; max-height:200px; overflow-y:auto;">${escapeHtml(fingerprint)}</div><div class="modal-buttons">${showExport ? '<button class="btn" id="fpExportBtn" style="flex:1">📁 ' + t('exportFp') + '</button>' : ''}<button class="btn modal-cancel" style="flex:1">${t('close')}</button></div>`;
             showModal(content, null, null);
             if (showExport) {
                 setTimeout(() => {
@@ -216,6 +245,7 @@
             document.getElementById('copyBtnText').innerText = t('copyBtn');
             document.getElementById('imageBtnText').innerText = t('imageBtn');
             document.getElementById('sendBtnText').innerText = t('sendBtn');
+            document.getElementById('privateBtnText').innerText = t('privateBtn');
             document.getElementById('sidebarHeaderText').innerHTML = t('sidebarHeader');
             document.getElementById('footerText').innerHTML = t('footerText');
             if(document.getElementById('messageInput')) document.getElementById('messageInput').placeholder = t('inputPlaceholder');
@@ -240,10 +270,10 @@
         }
         
         let myIdentity = null, peerIdentities = new Map(), onlinePeers = new Map();
-        let myUserKeyPair = null, peerUserKeys = new Map(); // 用户级非对称密钥
+        let myUserKeyPair = null, peerUserKeys = new Map();
         let keyRotationInterval = null;
         let pendingMessages = new Map();
-        let currentP2P = null, myRawId = null, isInRoom = false, aesKey = null, currentRoomKey96 = "", silentUntil = 0;
+        let currentP2P = null, myRawId = null, isInRoom = false, aesKey = null, currentRoomKey = "", silentUntil = 0;
         const encoder = new TextEncoder(), decoder = new TextDecoder();
         const showLoading = (text) => { document.getElementById('globalLoader').classList.add('active'); if(text) document.getElementById('loadingText').innerText = text; };
         const hideLoading = () => { document.getElementById('globalLoader').classList.remove('active'); document.getElementById('loadingText').innerText = ''; };
@@ -288,7 +318,7 @@
                     e.stopPropagation();
                     const fp = el.getAttribute('data-sender-fp');
                     const name = el.getAttribute('data-sender-name');
-                    if (fp && fp !== 'undefined') {
+                    if (fp && fp !== 'undefined' && fp !== '') {
                         showFingerprintDialog(name ? `${name} ${t('viewFullFp')}` : t('viewFullFp'), fp, false);
                     }
                 });
@@ -318,19 +348,28 @@
         
         function appendChatMessage(senderNick, senderFp, message, isSelf = false) {
             const timeStr = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-            const displayName = `${senderNick}[🫆${senderFp}]`;
+            const shortFp = senderFp.slice(0,5);
+            const displayName = `${senderNick}[🫆${shortFp}]`;
             allMessages.push({ senderName: displayName, message: message, isSelf: isSelf, timestamp: timeStr, senderFp: senderFp, senderRawName: senderNick });
             pruneOldMessages();
             if (currentDisplayStart === 0 && allMessages.length > DISPLAY_BATCH) currentDisplayStart = allMessages.length - DISPLAY_BATCH;
             renderMessages();
         }
         
+        // 指纹生成：完整SHA-256哈希（64位十六进制），短指纹取前5位
+        async function generateFingerprint(seed) {
+            const enc = new TextEncoder();
+            const fullSeed = IMGJX_SALT + seed;
+            const hashBuffer = await crypto.subtle.digest('SHA-256', enc.encode(fullSeed));
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const fullHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+            const shortHash = fullHash.slice(0, 5);
+            return { fullHash, shortHash };
+        }
+        
         async function generateIdentity(nickname, importSeed = null) {
             const seed = importSeed || (crypto.randomUUID() + Date.now() + crypto.getRandomValues(new Uint8Array(8)));
-            const enc = new TextEncoder();
-            const seedHash = await crypto.subtle.digest('SHA-256', enc.encode(seed));
-            const fullHash = Array.from(new Uint8Array(seedHash)).map(b => b.toString(16).padStart(2,'0')).join('');
-            const shortHash = fullHash.slice(0,5).toUpperCase();
+            const { fullHash, shortHash } = await generateFingerprint(seed);
             const keyPair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
             return { seed, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, fingerprintShort: shortHash, fingerprintFull: fullHash, nickname };
         }
@@ -378,7 +417,8 @@
                 validCount++;
                 const div = document.createElement('div');
                 div.className = 'user-item';
-                div.innerHTML = `<div class="user-name">${escapeHtml(info.nickname)}<span class="fingerprint-icon">[🫆${info.fingerprintShort || '??'}]</span></div>`;
+                const shortFp = (info.fingerprintFull || info.fingerprintShort || '??').slice(0,5);
+                div.innerHTML = `<div class="user-name">${escapeHtml(info.nickname)}<span class="fingerprint-icon">[🫆${shortFp}]</span></div>`;
                 div.onclick = () => showFingerprintDialog(`${info.nickname} ${t('viewFullFp')}`, info.fingerprintFull || 'N/A', false);
                 container.appendChild(div);
             }
@@ -390,33 +430,37 @@
             }
         }
         
-        async function encryptForPeer(peerId, plaintext) {
-            const peerKey = peerUserKeys.get(peerId);
+        // 使用用户级非对称加密
+        async function sendUserEncrypted(targetId, plaintext) {
+            const peerKey = peerUserKeys.get(targetId);
             if (!peerKey) return null;
             const iv = crypto.getRandomValues(new Uint8Array(12));
             const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, peerKey, encoder.encode(plaintext));
             return { iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) };
         }
         
-        async function decryptFromPeer(peerId, encryptedData) {
+        async function decryptUserEncrypted(peerId, encryptedData) {
             const peerKey = peerUserKeys.get(peerId);
             if (!peerKey) return null;
             const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(encryptedData.iv) }, peerKey, new Uint8Array(encryptedData.data));
             return decoder.decode(decrypted);
         }
         
-        async function sendEncrypted(targetId, type, payload, useUserEncryption = true) {
+        async function sendEncrypted(targetId, type, payload, useUserEncryption = false) {
             if (!currentP2P || !aesKey) return;
             let finalPayload = { type, ...payload };
-            let encryptedData;
-            if (useUserEncryption && targetId && targetId !== myRawId) {
+            let transportPayload = finalPayload;
+            
+            if (useUserEncryption && targetId && targetId !== myRawId && peerUserKeys.has(targetId)) {
                 const plaintext = JSON.stringify(finalPayload);
-                const encrypted = await encryptForPeer(targetId, plaintext);
-                if (!encrypted) return;
-                finalPayload = { encrypted: true, data: encrypted };
+                const encrypted = await sendUserEncrypted(targetId, plaintext);
+                if (encrypted) {
+                    transportPayload = { encrypted: true, data: encrypted };
+                }
             }
+            
             const iv = crypto.getRandomValues(new Uint8Array(12));
-            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encoder.encode(JSON.stringify(finalPayload)));
+            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encoder.encode(JSON.stringify(transportPayload)));
             const combined = new Uint8Array(iv.length + encrypted.byteLength);
             combined.set(iv); combined.set(new Uint8Array(encrypted), iv.length);
             if (targetId) {
@@ -433,47 +477,80 @@
         async function rotateUserKey() {
             if (!myUserKeyPair || !currentP2P || !isInRoom) return;
             const newKeyPair = await generateUserKeyPair();
-            const oldPublicJwk = await exportPublicKeyJwk(myUserKeyPair.publicKey);
             myUserKeyPair = newKeyPair;
-            const newPublicJwk = await exportPublicKeyJwk(myUserKeyPair.publicKey);
-            await sendEncrypted(null, 'key_rotate', { oldPublicKey: oldPublicJwk, newPublicKey: newPublicJwk });
-            appendSystemMessage(t('keyRotated'));
+            const myUserPubJwk = await exportPublicKeyJwk(myUserKeyPair.publicKey);
+            for (let [pid, info] of onlinePeers) {
+                if (pid !== myRawId && info.nickname !== "加载中...") {
+                    await sendEncrypted(pid, 'key_rotate', { newPublicKey: myUserPubJwk }, true);
+                }
+            }
         }
         
         async function handleUserKeyExchange(senderId, publicKeyJwk) {
-            const peerPublicKey = await importPublicKeyJwk(publicKeyJwk);
-            const sharedKey = await deriveSharedSecret(myUserKeyPair.privateKey, peerPublicKey);
-            peerUserKeys.set(senderId, sharedKey);
+            try {
+                const peerPublicKey = await importPublicKeyJwk(publicKeyJwk);
+                const sharedKey = await deriveSharedSecret(myUserKeyPair.privateKey, peerPublicKey);
+                peerUserKeys.set(senderId, sharedKey);
+                console.log(`imgjx: User key exchanged with ${senderId.slice(0,8)}`);
+            } catch(e) { console.warn("imgjx: Key exchange failed:", e); }
         }
         
-        async function sendChatMessage(text, isImage = false, imgData = null) {
+        async function sendChatMessage(text, isImage = false, imgData = null, targetFingerprint = null) {
             if (!currentP2P || !aesKey || !myIdentity) return;
             const { seq, win } = getNextSeq(myRawId);
-            const content = { text: isImage ? null : text, image: imgData, seq, win, fromNick: myIdentity.nickname, fromFp: myIdentity.fingerprintShort };
+            const content = { text: isImage ? null : text, image: imgData, seq, win, fromNick: myIdentity.nickname, fromFp: myIdentity.fingerprintFull };
             const signature = await signMessage(myIdentity.privateKey, JSON.stringify(content));
-            for (let [pid, info] of onlinePeers) {
-                if (pid !== myRawId && info.nickname !== "加载中...") {
-                    await sendEncrypted(pid, 'chat', { signature, ...content }, true);
+            
+            if (targetFingerprint) {
+                let targetId = null;
+                for (let [pid, info] of onlinePeers) {
+                    if (info.fingerprintFull === targetFingerprint) {
+                        targetId = pid;
+                        break;
+                    }
                 }
+                if (targetId && targetId !== myRawId) {
+                    await sendEncrypted(targetId, 'chat', { signature, ...content }, true);
+                    appendSystemMessage(`${t('privateSent')} ${targetFingerprint.slice(0,8)}...`);
+                } else {
+                    showAlert(t('privateNotFound'));
+                }
+            } else {
+                for (let [pid, info] of onlinePeers) {
+                    if (pid !== myRawId && info.nickname !== "加载中...") {
+                        await sendEncrypted(pid, 'chat', { signature, ...content }, true);
+                    }
+                }
+                const displayMsg = isImage ? `<img src="${imgData}">` : escapeHtml(text);
+                appendChatMessage(myIdentity.nickname, myIdentity.fingerprintFull, displayMsg, true);
             }
-            const displayMsg = isImage ? `<img src="${imgData}">` : escapeHtml(text);
-            appendChatMessage(myIdentity.nickname, myIdentity.fingerprintShort, displayMsg, true);
         }
         
         async function handleReceivedMessage(senderId, data) {
             if (data.encrypted && data.data) {
-                const decrypted = await decryptFromPeer(senderId, data.data);
+                const decrypted = await decryptUserEncrypted(senderId, data.data);
                 if (decrypted) {
                     data = JSON.parse(decrypted);
+                } else {
+                    return;
                 }
             }
             
             if (data.type === 'identity') {
                 const pub = await crypto.subtle.importKey('jwk', data.publicKey, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']);
-                peerIdentities.set(senderId, { nickname: data.nickname, fingerprintShort: data.fingerprintShort, fingerprintFull: data.fingerprintFull, publicKey: pub });
+                peerIdentities.set(senderId, { 
+                    nickname: data.nickname, 
+                    fingerprintShort: data.fingerprintShort, 
+                    fingerprintFull: data.fingerprintFull || data.fingerprintShort, 
+                    publicKey: pub 
+                });
                 const existing = onlinePeers.get(senderId);
                 if (!existing || existing.nickname === "加载中...") {
-                    onlinePeers.set(senderId, { nickname: data.nickname, fingerprintShort: data.fingerprintShort, fingerprintFull: data.fingerprintFull });
+                    onlinePeers.set(senderId, { 
+                        nickname: data.nickname, 
+                        fingerprintShort: data.fingerprintShort, 
+                        fingerprintFull: data.fingerprintFull || data.fingerprintShort 
+                    });
                     updateOnlineUI();
                     if (Date.now() >= silentUntil) appendSystemMessage(`${data.nickname} ${t('joined')}`);
                     await processPendingMessages(senderId);
@@ -483,12 +560,18 @@
                 }
                 const myPubJwk = await crypto.subtle.exportKey('jwk', myIdentity.publicKey);
                 const myUserPubJwk = await exportPublicKeyJwk(myUserKeyPair.publicKey);
-                await sendEncrypted(senderId, 'identity', { nickname: myIdentity.nickname, fingerprintShort: myIdentity.fingerprintShort, fingerprintFull: myIdentity.fingerprintFull, publicKey: myPubJwk, userPublicKey: myUserPubJwk }, true);
+                await sendEncrypted(senderId, 'identity', { 
+                    nickname: myIdentity.nickname, 
+                    fingerprintShort: myIdentity.fingerprintShort, 
+                    fingerprintFull: myIdentity.fingerprintFull, 
+                    publicKey: myPubJwk, 
+                    userPublicKey: myUserPubJwk 
+                }, true);
             }
             else if (data.type === 'key_rotate') {
-                const newPublicKey = await importPublicKeyJwk(data.newPublicKey);
-                const sharedKey = await deriveSharedSecret(myUserKeyPair.privateKey, newPublicKey);
-                peerUserKeys.set(senderId, sharedKey);
+                if (data.newPublicKey) {
+                    await handleUserKeyExchange(senderId, data.newPublicKey);
+                }
             }
             else if (data.type === 'chat') {
                 if (!checkAndUpdateSeq(senderId, data.seq, data.win)) { appendSystemMessage(t('replyAttack')); return; }
@@ -511,7 +594,13 @@
             else if (data.type === 'identity_req') {
                 const myPubJwk = await crypto.subtle.exportKey('jwk', myIdentity.publicKey);
                 const myUserPubJwk = await exportPublicKeyJwk(myUserKeyPair.publicKey);
-                await sendEncrypted(senderId, 'identity', { nickname: myIdentity.nickname, fingerprintShort: myIdentity.fingerprintShort, fingerprintFull: myIdentity.fingerprintFull, publicKey: myPubJwk, userPublicKey: myUserPubJwk }, true);
+                await sendEncrypted(senderId, 'identity', { 
+                    nickname: myIdentity.nickname, 
+                    fingerprintShort: myIdentity.fingerprintShort, 
+                    fingerprintFull: myIdentity.fingerprintFull, 
+                    publicKey: myPubJwk, 
+                    userPublicKey: myUserPubJwk 
+                }, true);
             }
             else if (data.type === 'leave') {
                 if (onlinePeers.has(senderId)) {
@@ -543,7 +632,13 @@
             const myUserPubJwk = await exportPublicKeyJwk(myUserKeyPair.publicKey);
             for (let pid of onlinePeers.keys()) {
                 if (pid !== myRawId && onlinePeers.get(pid)?.nickname !== "加载中...") {
-                    await sendEncrypted(pid, 'identity', { nickname: myIdentity.nickname, fingerprintShort: myIdentity.fingerprintShort, fingerprintFull: myIdentity.fingerprintFull, publicKey: myPubJwk, userPublicKey: myUserPubJwk }, true);
+                    await sendEncrypted(pid, 'identity', { 
+                        nickname: myIdentity.nickname, 
+                        fingerprintShort: myIdentity.fingerprintShort, 
+                        fingerprintFull: myIdentity.fingerprintFull, 
+                        publicKey: myPubJwk, 
+                        userPublicKey: myUserPubJwk 
+                    }, true);
                 }
             }
         }
@@ -552,10 +647,14 @@
             await sendEncrypted(null, 'leave', {});
         }
         
-        async function enterRoom(appName, channelName, password, rawKey96) {
+        async function enterRoom(roomKey) {
             showLoading(t('derivingKey'));
             try {
-                aesKey = await deriveAesKeyFrom96(rawKey96);
+                // 先派生房间参数（使用 PBKDF2，快速）
+                const { appName, channelName, password, roomId } = await deriveRoomParamsFromKey(roomKey);
+                console.log(`imgjx: Room derived - ${roomId.slice(0,16)}...`);
+                // 再派生 AES 密钥
+                aesKey = await deriveAesKeyFromRoomKey(roomKey);
                 myUserKeyPair = await generateUserKeyPair();
                 const p2p = webconnect({ appName, channelName, connectPassword: password, iceConfiguration: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
                 currentP2P = p2p;
@@ -570,7 +669,13 @@
                         updateOnlineUI();
                         const myPubJwk = await crypto.subtle.exportKey('jwk', myIdentity.publicKey);
                         const myUserPubJwk = await exportPublicKeyJwk(myUserKeyPair.publicKey);
-                        await sendEncrypted(ci.connectId, 'identity', { nickname: myIdentity.nickname, fingerprintShort: myIdentity.fingerprintShort, fingerprintFull: myIdentity.fingerprintFull, publicKey: myPubJwk, userPublicKey: myUserPubJwk }, true);
+                        await sendEncrypted(ci.connectId, 'identity', { 
+                            nickname: myIdentity.nickname, 
+                            fingerprintShort: myIdentity.fingerprintShort, 
+                            fingerprintFull: myIdentity.fingerprintFull, 
+                            publicKey: myPubJwk, 
+                            userPublicKey: myUserPubJwk 
+                        }, true);
                     }
                 });
                 
@@ -596,28 +701,33 @@
                             const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, encrypted);
                             const msgData = JSON.parse(decoder.decode(decrypted));
                             await handleReceivedMessage(ci.connectId, msgData);
-                        } catch(e) { console.warn("Decrypt error:", e); }
+                        } catch(e) { console.warn("imgjx: Decrypt error:", e); }
                     }
                 });
                 
                 if (keyRotationInterval) clearInterval(keyRotationInterval);
-                keyRotationInterval = setInterval(() => rotateUserKey(), 180000); // 3分钟
+                keyRotationInterval = setInterval(() => rotateUserKey(), 180000);
                 
                 document.getElementById('homeScreen').style.display = 'none';
                 document.getElementById('joinRoomPanel').style.display = 'none';
                 document.getElementById('chatRoomUI').style.display = 'flex';
                 appendSystemMessage(t('channelReady'));
-                document.getElementById('inviteKeyDisplay').innerHTML = '•'.repeat(96);
+                document.getElementById('inviteKeyDisplay').innerHTML = '•'.repeat(128);
                 document.getElementById('inviteKeyContainer').style.display = 'flex';
                 const warn = document.getElementById('historyWarning');
                 if(warn) { warn.style.display = 'block'; setTimeout(() => { if(warn) warn.style.display = 'none'; }, 8000); }
                 isInRoom = true;
-                currentRoomKey96 = rawKey96;
+                currentRoomKey = roomKey;
                 onlinePeers.set(myRawId, { nickname: myIdentity.nickname, fingerprintShort: myIdentity.fingerprintShort, fingerprintFull: myIdentity.fingerprintFull });
                 peerIdentities.set(myRawId, myIdentity);
                 updateOnlineUI();
                 hideLoading();
-            } catch(e) { hideLoading(); showAlert("进入房间失败: "+e.message); throw e; }
+            } catch(e) { 
+                hideLoading(); 
+                console.error(e);
+                showAlert("进入房间失败: "+e.message); 
+                throw e; 
+            }
         }
         
         function showIdentityDialog(onConfirm) {
@@ -639,7 +749,7 @@
                         if (!pwd) { showAlert(t('importPassword')); hideLoading(); return; }
                         const contentText = await selectedFile.text();
                         const imported = JSON.parse(contentText);
-                        const encKey = await deriveKeyFromPassword(pwd, 'FingerprintSalt-V3', FINGERPRINT_ITERATIONS);
+                        const encKey = await deriveKeyFromPassword(pwd, 'FingerprintSalt-V3', FINGERPRINT_ITERATIONS, true);
                         const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(imported.iv) }, encKey, new Uint8Array(imported.data));
                         const decryptedSeed = decoder.decode(decrypted);
                         identity = await generateIdentity(nick, decryptedSeed);
@@ -657,7 +767,7 @@
         }
         
         async function exportEncryptedFingerprint(identity, password) {
-            const encKey = await deriveKeyFromPassword(password, 'FingerprintSalt-V3', FINGERPRINT_ITERATIONS);
+            const encKey = await deriveKeyFromPassword(password, 'FingerprintSalt-V3', FINGERPRINT_ITERATIONS, true);
             const iv = crypto.getRandomValues(new Uint8Array(12));
             const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, encKey, encoder.encode(identity.seed));
             return JSON.stringify({ nickname: identity.nickname, fingerprintShort: identity.fingerprintShort, iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) });
@@ -694,23 +804,21 @@
             if (isInRoom) await leaveCurrentRoom();
             showIdentityDialog(async (identity) => {
                 myIdentity = identity;
-                const strongKey = generate96BitKey();
-                const { appName, channelName, password } = parse96KeyToRoomParams(strongKey);
-                await enterRoom(appName, channelName, password, strongKey);
+                const roomKey = generate128BitRoomKey();
+                await enterRoom(roomKey);
             });
         }
         
         async function handleJoinWithKey() {
-            const content = `<h3>${t('joinPanelTitle')}</h3><input id="joinKeyInput" placeholder="粘贴96位密钥" style="width:100%; padding:10px;"><div class="helper-text" style="margin:8px 0;">${t('keyHelper')}</div><div class="modal-buttons"><button class="btn modal-confirm">${t('confirmJoin')}</button><button class="btn modal-cancel">${t('back')}</button></div>`;
+            const content = `<h3>${t('joinPanelTitle')}</h3><textarea id="joinKeyInput" placeholder="粘贴128位房间密钥" rows="3" style="width:100%; padding:10px; font-family:monospace;"></textarea><div class="helper-text" style="margin:8px 0;">${t('keyHelper')}</div><div class="modal-buttons"><button class="btn modal-confirm">${t('confirmJoin')}</button><button class="btn modal-cancel">${t('back')}</button></div>`;
             showModal(content, async (dialog) => {
-                const key96 = dialog.querySelector('#joinKeyInput').value.trim();
-                if (key96.length !== 96) { showAlert(t('invalidKey')); return; }
+                const roomKey = dialog.querySelector('#joinKeyInput').value.trim();
+                if (roomKey.length !== 128) { showAlert(t('invalidKey')); return; }
                 if (isInRoom && !confirm("离开当前房间？")) return;
                 if (isInRoom) await leaveCurrentRoom();
                 showIdentityDialog(async (identity) => {
                     myIdentity = identity;
-                    const { appName, channelName, password } = parse96KeyToRoomParams(key96);
-                    await enterRoom(appName, channelName, password, key96);
+                    await enterRoom(roomKey);
                 });
             });
         }
@@ -736,7 +844,6 @@
             let text = document.getElementById('messageInput').value.trim();
             if (!text && !document.getElementById('imageInput').files.length) return;
             if (!currentP2P || !isInRoom || !aesKey) { showAlert("未连接房间"); return; }
-            if (!navigator.onLine) { appendSystemMessage(t('offlineMsg')); return; }
             if (document.getElementById('imageInput').files.length) {
                 const file = document.getElementById('imageInput').files[0];
                 appendSystemMessage(t('compressing'));
@@ -751,23 +858,41 @@
             if (text) { await sendChatMessage(text); document.getElementById('messageInput').value = ''; }
         }
         
+        async function showPrivateMessageDialog() {
+            if (!currentP2P || !isInRoom || !aesKey) { showAlert("未连接房间"); return; }
+            const content = `<h3>${t('privateMsgTitle')}</h3>
+                <input type="text" id="targetFingerprint" placeholder="${t('privateMsgPlaceholder')}" style="width:100%; padding:8px; margin:8px 0; font-family:monospace;">
+                <textarea id="privateMsgText" rows="3" placeholder="${t('privateMsgContent')}" style="width:100%; padding:8px; margin:8px 0;"></textarea>
+                <div class="modal-buttons"><button class="btn modal-confirm">${t('sendPrivate')}</button><button class="btn modal-cancel">${t('close')}</button></div>`;
+            showModal(content, async (dialog) => {
+                const targetFp = dialog.querySelector('#targetFingerprint').value.trim().toUpperCase();
+                const msgText = dialog.querySelector('#privateMsgText').value.trim();
+                if (!targetFp) { showAlert("请输入对方完整指纹（64位十六进制）"); return; }
+                if (targetFp.length !== 64) { showAlert("指纹必须是64位十六进制字符串"); return; }
+                if (!msgText) { showAlert("请输入消息内容"); return; }
+                await sendChatMessage(msgText, false, null, targetFp);
+            });
+        }
+        
         // 事件绑定
         document.getElementById('homeCreateBtn').onclick = handleCreateRoom;
         document.getElementById('homeJoinBtn').onclick = handleJoinWithKey;
         document.getElementById('leaveRoomBtn').onclick = leaveCurrentRoom;
         document.getElementById('sendMsgBtn').onclick = sendMessage;
+        document.getElementById('privateMsgBtn').onclick = showPrivateMessageDialog;
         document.getElementById('messageInput').addEventListener('keydown', (e) => { if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage(); });
-        document.getElementById('copyInviteKeyBtn').onclick = async () => { try { await navigator.clipboard.writeText(currentRoomKey96); showAlert(t('copySuccess')); } catch(e) { showAlert("手动复制"); } };
+        document.getElementById('copyInviteKeyBtn').onclick = async () => { try { await navigator.clipboard.writeText(currentRoomKey); showAlert(t('copySuccess')); } catch(e) { showAlert("手动复制"); } };
+        document.getElementById('imageInput').addEventListener('change', sendMessage);
         
         let keyVisible = false;
         const keyDisplaySpan = document.getElementById('inviteKeyDisplay');
         const toggleKeyBtn = document.getElementById('toggleKeyVisibilityBtn');
         if (keyDisplaySpan && toggleKeyBtn) {
             keyVisible = false;
-            keyDisplaySpan.innerHTML = '•'.repeat(96);
+            keyDisplaySpan.innerHTML = '•'.repeat(128);
             toggleKeyBtn.onclick = () => {
                 keyVisible = !keyVisible;
-                keyDisplaySpan.innerHTML = keyVisible ? currentRoomKey96 : '•'.repeat(96);
+                keyDisplaySpan.innerHTML = keyVisible ? currentRoomKey : '•'.repeat(128);
                 toggleKeyBtn.innerText = keyVisible ? '🙈' : '👁️';
             };
         }
@@ -786,7 +911,6 @@
             if(!myIdentity) return;
             showFingerprintDialog(t('myFingerprint'), myIdentity.fingerprintFull, true, () => exportCurrentFingerprint());
         };
-        document.getElementById('imageInput').addEventListener('change', sendMessage);
         
         document.querySelectorAll('.lang-btn').forEach(btn => {
             btn.onclick = () => {
