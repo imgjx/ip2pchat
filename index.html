@@ -89,6 +89,21 @@
         const UNLOAD_THRESHOLD = 300;
         const IMGJX_SALT = "imgjx_ip2pchat_salt_v3";
         
+        // 存储当前打开的模态框，用于关闭
+        let currentModalOverlay = null;
+        let currentModalDialog = null;
+        
+        function closeCurrentModal() {
+            if (currentModalOverlay) {
+                currentModalOverlay.remove();
+                currentModalOverlay = null;
+            }
+            if (currentModalDialog) {
+                currentModalDialog.remove();
+                currentModalDialog = null;
+            }
+        }
+        
         // 生成128位房间密钥
         function generate128BitRoomKey() {
             let key = '';
@@ -113,26 +128,21 @@
         async function deriveRoomParamsFromKey(roomKey) {
             if (roomKey.length !== 128) throw new Error('房间密钥必须为128位');
             
-            // 提取指定位置字符: 第2~6位(索引1-5)，9,10,12,22,33,44,55,66,77,88,95
             const positions = [1,2,3,4,5, 8,9, 11, 21, 32, 43, 54, 65, 76, 87, 94];
             let roomSeed = '';
             for (let pos of positions) {
                 if (pos < roomKey.length) roomSeed += roomKey[pos];
             }
-            // 使用 PBKDF2 派生5000次，取前48字符
             const roomIdFull = await pbkdf2Derive(roomSeed, IMGJX_SALT + '_roomid', ROOM_ID_PBKDF2_ITERATIONS, 48);
             const roomIdPart = roomIdFull.slice(0, 48);
             
-            // 提取房间密钥第24~32字符（索引23-31）
             const aesSeedPart = roomKey.slice(23, 32);
-            // 对aesSeedPart进行SHA-256，取32~60位
             const enc = new TextEncoder();
             const aesSeedHashBuf = await crypto.subtle.digest('SHA-256', enc.encode(aesSeedPart + IMGJX_SALT));
             const aesSeedHashArray = Array.from(new Uint8Array(aesSeedHashBuf));
             const aesSeedHashStr = aesSeedHashArray.map(b => b.toString(16).padStart(2, '0')).join('');
             const aesPart = aesSeedHashStr.slice(32, 60);
             
-            // 从房间密钥派生临时AES密钥取最后4字符（可提取用于导出）
             const tempAesKey = await deriveKeyFromPassword(roomKey, 'RoomKeyTemp', 1000, true);
             const tempAesKeyBuf = await crypto.subtle.exportKey('raw', tempAesKey);
             const tempAesKeyArray = Array.from(new Uint8Array(tempAesKeyBuf));
@@ -197,80 +207,62 @@
         
         // ==================== 多语言 ====================
         const translations = {
-            en: { headerNotice: "This program is for webconnect browser JS library learning only. Please comply with local laws!", createRoom: "Create Room", joinRoom: "Join Room", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Enter 128-digit Room Key", keyHelper: "Key length 128", confirmJoin: "Confirm Join", back: "Back", leaveBtn: "Leave", inviteLabel: "🔑 Room Key", copyBtn: "Copy Key", imageBtn: "Send Image", sendBtn: "Send Message", privateBtn: "Private Msg", sidebarHeader: "👥 Online Members List", footerText: "⚡ iP2P Chat | Private Communication | Zero Server | E2EE", channelReady: "✅ P2P encrypted channel started", historyWarning: "ℹ️ New users cannot see previous messages (E2EE).", system: "System", copySuccess: "Copied!", invalidKey: "Invalid key length (must be 128 chars)", changeNickname: "Change Nickname", newNickname: "New nickname:", replyAttack: "Replay attack detected", sigInvalid: "Signature invalid", joined: "joined", left: "left", inputPlaceholder: "Type message... Ctrl+Enter", exportFp: "Export", viewFullFp: "Full fingerprint: ", generating: "Generating...", exportPassword: "Set export password", confirmExportPassword: "Confirm password", passwordMismatch: "Passwords do not match", importFailed: "Import failed", compressing: "Compressing...", myFingerprint: "My Fingerprint", close: "Close", importFingerprint: "Import fingerprint", importPassword: "Import password", identitySetup: "Set Your Identity", nicknamePlaceholder: "Nickname", enterRoom: "Enter Room", derivingKey: "Deriving room key...", processing: "Processing...", clearFile: "Clear", exportSuccess: "Exported", onlinePrefix: "👥 Online: ", onlineSuffix: "", fingerprintCopied: "Fingerprint copied", loadMore: "Load more...", copyFingerprint: "Copy", leavingRoom: "Leaving...", creatingRoom: "Creating...", joiningRoom: "Joining...", privateMsgTitle: "Send Private Message", privateMsgInput: "Enter recipient's full fingerprint (64 hex chars):", privateMsgPlaceholder: "Paste full 64-character fingerprint here", privateMsgContent: "Message content:", sendPrivate: "Send", privateSent: "Private message sent to", privateNotFound: "User not found with that fingerprint", confirmLeave: "Leave current room?", confirmExit: "Confirm" },
-            zh: { headerNotice: "本程序仅用于webconnect浏览器js库学习使用，请遵守当地法律！", createRoom: "创建房间", joinRoom: "加入房间", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 输入128位房间密钥", keyHelper: "密钥长度128", confirmJoin: "确认加入", back: "返回", leaveBtn: "退出", inviteLabel: "🔑 房间密钥", copyBtn: "复制密钥", imageBtn: "发送图片", sendBtn: "发送消息", privateBtn: "单点消息", sidebarHeader: "👥 在线成员列表", footerText: "⚡ iP2P Chat | 私密通信 | 零服务器 | 端到端加密", channelReady: "✅ P2P加密信道启动成功", historyWarning: "ℹ️ 新加入的用户无法看到历史消息（端到端加密）", system: "系统", copySuccess: "已复制", invalidKey: "无效的密钥长度（必须为128位）", changeNickname: "修改昵称", newNickname: "新昵称:", replyAttack: "检测到重放攻击", sigInvalid: "签名验证失败", joined: "加入房间", left: "离开房间", inputPlaceholder: "输入消息... Ctrl+Enter 发送", exportFp: "导出指纹", viewFullFp: "完整指纹: ", generating: "正在生成...", exportPassword: "设置导出密码", confirmExportPassword: "确认导出密码", passwordMismatch: "两次输入的密码不一致", importFailed: "导入失败", compressing: "压缩图片中...", myFingerprint: "我的指纹", close: "关闭", importFingerprint: "导入指纹（可选）", importPassword: "导入密码", identitySetup: "设置你的身份", nicknamePlaceholder: "昵称", enterRoom: "进入房间", derivingKey: "正在派生房间密钥...", processing: "处理中...", clearFile: "清除", exportSuccess: "指纹已导出", onlinePrefix: "👥 在线: ", onlineSuffix: "人", fingerprintCopied: "指纹已复制", loadMore: "加载更多...", copyFingerprint: "复制指纹", leavingRoom: "正在退出...", creatingRoom: "正在创建...", joiningRoom: "正在加入...", privateMsgTitle: "发送单点消息", privateMsgInput: "输入接收者的完整指纹（64位十六进制）:", privateMsgPlaceholder: "粘贴完整的64位指纹", privateMsgContent: "消息内容:", sendPrivate: "发送", privateSent: "单点消息已发送至", privateNotFound: "未找到该指纹的用户", confirmLeave: "确定要离开当前房间吗？", confirmExit: "确认" },
-            ja: { headerNotice: "学習用プログラム", createRoom: "作成", joinRoom: "参加", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 128桁ルームキー入力", keyHelper: "128文字", confirmJoin: "参加", back: "戻る", leaveBtn: "退出", inviteLabel: "🔑 ルームキー", copyBtn: "コピー", imageBtn: "画像送信", sendBtn: "送信", privateBtn: "個別", sidebarHeader: "👥 メンバーリスト", footerText: "⚡ iP2P Chat | プライベート通信 | ゼロサーバー | E2EE", channelReady: "✅ P2P暗号化チャネル起動", historyWarning: "ℹ️ 過去メッセージは見えません", system: "システム", copySuccess: "完了", invalidKey: "無効なキー長（128文字）", changeNickname: "変更", newNickname: "新名前:", replyAttack: "リプレイ攻撃", sigInvalid: "署名無効", joined: "参加", left: "退出", inputPlaceholder: "メッセージ... Ctrl+Enter", exportFp: "エクスポート", viewFullFp: "完全な指紋: ", generating: "生成中...", exportPassword: "パスワード設定", confirmExportPassword: "確認", passwordMismatch: "不一致", importFailed: "失敗", compressing: "圧縮中...", myFingerprint: "指紋", close: "閉じる", importFingerprint: "インポート", importPassword: "パスワード", identitySetup: "設定", nicknamePlaceholder: "名前", enterRoom: "入室", derivingKey: "キー導出中...", processing: "処理中...", clearFile: "クリア", exportSuccess: "完了", onlinePrefix: "👥 オンライン: ", onlineSuffix: "人", fingerprintCopied: "指紋コピー", loadMore: "もっと読み込む...", copyFingerprint: "コピー", leavingRoom: "退出中...", creatingRoom: "作成中...", joiningRoom: "参加中...", privateMsgTitle: "個別メッセージ", privateMsgInput: "受信者の完全な指紋（64桁）:", privateMsgPlaceholder: "64桁の指紋を貼り付け", privateMsgContent: "メッセージ内容:", sendPrivate: "送信", privateSent: "送信先", privateNotFound: "指紋が見つかりません", confirmLeave: "ルームを退出しますか？", confirmExit: "確認" },
-            ru: { headerNotice: "Для изучения webconnect", createRoom: "Создать", joinRoom: "Войти", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Введите 128-значный ключ комнаты", keyHelper: "128 символов", confirmJoin: "Войти", back: "Назад", leaveBtn: "Выйти", inviteLabel: "🔑 Ключ комнаты", copyBtn: "Копировать", imageBtn: "Изо", sendBtn: "Отпр", privateBtn: "Приват", sidebarHeader: "👥 Список", footerText: "⚡ iP2P Chat | Приватная связь | Ноль серверов | E2EE", channelReady: "✅ P2P канал запущен", historyWarning: "ℹ️ История недоступна", system: "Система", copySuccess: "Скопировано", invalidKey: "Неверная длина ключа (128)", changeNickname: "Сменить ник", newNickname: "Новый ник:", replyAttack: "Атака повтора", sigInvalid: "Неверная подпись", joined: "присоединился", left: "покинул", inputPlaceholder: "Сообщение... Ctrl+Enter", exportFp: "Экспорт", viewFullFp: "Полный отпечаток: ", generating: "Генерация...", exportPassword: "Пароль", confirmExportPassword: "Подтвердите", passwordMismatch: "Не совпадают", importFailed: "Ошибка", compressing: "Сжатие...", myFingerprint: "Отпечаток", close: "Закрыть", importFingerprint: "Импорт", importPassword: "Пароль", identitySetup: "Настройка", nicknamePlaceholder: "Ник", enterRoom: "Войти", derivingKey: "Вывод ключа...", processing: "Обработка...", clearFile: "Очистить", exportSuccess: "Экспорт", onlinePrefix: "👥 Онлайн: ", onlineSuffix: "", fingerprintCopied: "Отпечаток скопирован", loadMore: "Загрузить...", copyFingerprint: "Копировать", leavingRoom: "Выход...", creatingRoom: "Создание...", joiningRoom: "Вход...", privateMsgTitle: "Приватное сообщение", privateMsgInput: "Полный отпечаток получателя:", privateMsgPlaceholder: "Вставьте 64-значный отпечаток", privateMsgContent: "Текст сообщения:", sendPrivate: "Отправить", privateSent: "Отправлено", privateNotFound: "Пользователь не найден", confirmLeave: "Покинуть комнату?", confirmExit: "ОК" }
+            en: { headerNotice: "This program is for webconnect browser JS library learning only. Please comply with local laws!", createRoom: "Create Room", joinRoom: "Join Room", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Enter 128-digit Room Key", keyHelper: "Key length 128", confirmJoin: "Confirm Join", back: "Back", leaveBtn: "Leave", inviteLabel: "🔑 Room Key", copyBtn: "Copy Key", imageBtn: "Send Image", sendBtn: "Send Message", privateBtn: "Private Msg", sidebarHeader: "👥 Online Members List", footerText: "⚡ iP2P Chat | Private Communication | Zero Server | E2EE", channelReady: "✅ P2P encrypted channel started", historyWarning: "ℹ️ New users cannot see previous messages (E2EE).", system: "System", copySuccess: "Copied!", invalidKey: "Invalid key length (must be 128 chars)", changeNickname: "Change Nickname", newNickname: "New nickname:", replyAttack: "Replay attack detected", sigInvalid: "Signature invalid", joined: "joined", left: "left", inputPlaceholder: "Type message... Ctrl+Enter", exportFp: "Export", viewFullFp: "Full fingerprint: ", generating: "Generating...", exportPassword: "Set export password", confirmExportPassword: "Confirm password", passwordMismatch: "Passwords do not match", importFailed: "Import failed", compressing: "Compressing...", myFingerprint: "My Fingerprint", close: "Close", importFingerprint: "Import fingerprint", importPassword: "Import password", identitySetup: "Set Your Identity", nicknamePlaceholder: "Nickname", enterRoom: "Enter Room", derivingKey: "Deriving room key...", processing: "Processing...", clearFile: "Clear", exportSuccess: "Exported", onlinePrefix: "👥 Online: ", onlineSuffix: "", fingerprintCopied: "Fingerprint copied", loadMore: "Load more...", copyFingerprint: "Copy", leavingRoom: "Leaving...", creatingRoom: "Creating...", joiningRoom: "Joining...", privateMsgTitle: "Send Private Message", privateMsgInput: "Enter recipient's full fingerprint (64 hex chars):", privateMsgPlaceholder: "Paste full 64-character fingerprint here", privateMsgContent: "Message content:", sendPrivate: "Send", privateSent: "Private message sent to", privateNotFound: "User not found with that fingerprint", confirmLeave: "Leave current room?", confirmExit: "Exit current room and create a new one?", confirmJoinLeave: "Leave current room?" },
+            zh: { headerNotice: "本程序仅用于webconnect浏览器js库学习使用，请遵守当地法律！", createRoom: "创建房间", joinRoom: "加入房间", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 输入128位房间密钥", keyHelper: "密钥长度128", confirmJoin: "确认加入", back: "返回", leaveBtn: "退出", inviteLabel: "🔑 房间密钥", copyBtn: "复制密钥", imageBtn: "发送图片", sendBtn: "发送消息", privateBtn: "单点消息", sidebarHeader: "👥 在线成员列表", footerText: "⚡ iP2P Chat | 私密通信 | 零服务器 | 端到端加密", channelReady: "✅ P2P加密信道启动成功", historyWarning: "ℹ️ 新加入的用户无法看到历史消息（端到端加密）", system: "系统", copySuccess: "已复制", invalidKey: "无效的密钥长度（必须为128位）", changeNickname: "修改昵称", newNickname: "新昵称:", replyAttack: "检测到重放攻击", sigInvalid: "签名验证失败", joined: "加入房间", left: "离开房间", inputPlaceholder: "输入消息... Ctrl+Enter 发送", exportFp: "导出指纹", viewFullFp: "完整指纹: ", generating: "正在生成...", exportPassword: "设置导出密码", confirmExportPassword: "确认导出密码", passwordMismatch: "两次输入的密码不一致", importFailed: "导入失败", compressing: "压缩图片中...", myFingerprint: "我的指纹", close: "关闭", importFingerprint: "导入指纹（可选）", importPassword: "导入密码", identitySetup: "设置你的身份", nicknamePlaceholder: "昵称", enterRoom: "进入房间", derivingKey: "正在派生房间密钥...", processing: "处理中...", clearFile: "清除", exportSuccess: "指纹已导出", onlinePrefix: "👥 在线: ", onlineSuffix: "人", fingerprintCopied: "指纹已复制", loadMore: "加载更多...", copyFingerprint: "复制指纹", leavingRoom: "正在退出...", creatingRoom: "正在创建...", joiningRoom: "正在加入...", privateMsgTitle: "发送单点消息", privateMsgInput: "输入接收者的完整指纹（64位十六进制）:", privateMsgPlaceholder: "粘贴完整的64位指纹", privateMsgContent: "消息内容:", sendPrivate: "发送", privateSent: "单点消息已发送至", privateNotFound: "未找到该指纹的用户", confirmLeave: "确定要退出当前房间吗？", confirmExit: "退出当前房间并创建新房间？", confirmJoinLeave: "确定要离开当前房间吗？" },
+            ja: { headerNotice: "学習用プログラム", createRoom: "作成", joinRoom: "参加", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 128桁ルームキー入力", keyHelper: "128文字", confirmJoin: "参加", back: "戻る", leaveBtn: "退出", inviteLabel: "🔑 ルームキー", copyBtn: "コピー", imageBtn: "画像送信", sendBtn: "送信", privateBtn: "個別", sidebarHeader: "👥 メンバーリスト", footerText: "⚡ iP2P Chat | プライベート通信 | ゼロサーバー | E2EE", channelReady: "✅ P2P暗号化チャネル起動", historyWarning: "ℹ️ 過去メッセージは見えません", system: "システム", copySuccess: "完了", invalidKey: "無効なキー長（128文字）", changeNickname: "変更", newNickname: "新名前:", replyAttack: "リプレイ攻撃", sigInvalid: "署名無効", joined: "参加", left: "退出", inputPlaceholder: "メッセージ... Ctrl+Enter", exportFp: "エクスポート", viewFullFp: "完全な指紋: ", generating: "生成中...", exportPassword: "パスワード設定", confirmExportPassword: "確認", passwordMismatch: "不一致", importFailed: "失敗", compressing: "圧縮中...", myFingerprint: "指紋", close: "閉じる", importFingerprint: "インポート", importPassword: "パスワード", identitySetup: "設定", nicknamePlaceholder: "名前", enterRoom: "入室", derivingKey: "キー導出中...", processing: "処理中...", clearFile: "クリア", exportSuccess: "完了", onlinePrefix: "👥 オンライン: ", onlineSuffix: "人", fingerprintCopied: "指紋コピー", loadMore: "もっと読み込む...", copyFingerprint: "コピー", leavingRoom: "退出中...", creatingRoom: "作成中...", joiningRoom: "参加中...", privateMsgTitle: "個別メッセージ", privateMsgInput: "受信者の完全な指紋（64桁）:", privateMsgPlaceholder: "64桁の指紋を貼り付け", privateMsgContent: "メッセージ内容:", sendPrivate: "送信", privateSent: "送信先", privateNotFound: "指紋が見つかりません", confirmLeave: "ルームを退出しますか？", confirmExit: "退出して新規作成しますか？", confirmJoinLeave: "退出しますか？" },
+            ru: { headerNotice: "Для изучения webconnect", createRoom: "Создать", joinRoom: "Войти", homeNotice: "https://github.com/imgjx/ip2pchat/", joinPanelTitle: "🔐 Введите 128-значный ключ комнаты", keyHelper: "128 символов", confirmJoin: "Войти", back: "Назад", leaveBtn: "Выйти", inviteLabel: "🔑 Ключ комнаты", copyBtn: "Копировать", imageBtn: "Изо", sendBtn: "Отпр", privateBtn: "Приват", sidebarHeader: "👥 Список", footerText: "⚡ iP2P Chat | Приватная связь | Ноль серверов | E2EE", channelReady: "✅ P2P канал запущен", historyWarning: "ℹ️ История недоступна", system: "Система", copySuccess: "Скопировано", invalidKey: "Неверная длина ключа (128)", changeNickname: "Сменить ник", newNickname: "Новый ник:", replyAttack: "Атака повтора", sigInvalid: "Неверная подпись", joined: "присоединился", left: "покинул", inputPlaceholder: "Сообщение... Ctrl+Enter", exportFp: "Экспорт", viewFullFp: "Полный отпечаток: ", generating: "Генерация...", exportPassword: "Пароль", confirmExportPassword: "Подтвердите", passwordMismatch: "Не совпадают", importFailed: "Ошибка", compressing: "Сжатие...", myFingerprint: "Отпечаток", close: "Закрыть", importFingerprint: "Импорт", importPassword: "Пароль", identitySetup: "Настройка", nicknamePlaceholder: "Ник", enterRoom: "Войти", derivingKey: "Вывод ключа...", processing: "Обработка...", clearFile: "Очистить", exportSuccess: "Экспорт", onlinePrefix: "👥 Онлайн: ", onlineSuffix: "", fingerprintCopied: "Отпечаток скопирован", loadMore: "Загрузить...", copyFingerprint: "Копировать", leavingRoom: "Выход...", creatingRoom: "Создание...", joiningRoom: "Вход...", privateMsgTitle: "Приватное сообщение", privateMsgInput: "Полный отпечаток получателя:", privateMsgPlaceholder: "Вставьте 64-значный отпечаток", privateMsgContent: "Текст сообщения:", sendPrivate: "Отправить", privateSent: "Отправлено", privateNotFound: "Пользователь не найден", confirmLeave: "Выйти из комнаты?", confirmExit: "Выйти и создать новую?", confirmJoinLeave: "Выйти из текущей комнаты?" }
         };
         let currentLang = 'zh';
         function t(key) { return translations[currentLang][key] || translations.zh[key] || key; }
         
-        // 全局弹框管理：关闭当前弹框再开新弹框
-        let currentOverlay = null;
-        let currentDialog = null;
-        
-        function closeCurrentModal() {
-            if (currentOverlay) currentOverlay.remove();
-            if (currentDialog) currentDialog.remove();
-            currentOverlay = null;
-            currentDialog = null;
-        }
-        
-        function showModal(contentHtml, onConfirm, onCancel, confirmText = null, cancelText = null) {
-            closeCurrentModal(); // 先关闭已存在的弹框
+        function showModal(contentHtml, onConfirm, onCancel, closeOnConfirm = true) {
+            closeCurrentModal();
             const overlay = document.createElement('div'); overlay.className = 'overlay';
             const dialog = document.createElement('div'); dialog.className = 'modal-dialog';
-            const confirmBtnText = confirmText || (t('confirmExit') || '确认');
-            const cancelBtnText = cancelText || (t('close') || '取消');
-            dialog.innerHTML = contentHtml + `<div class="modal-buttons"><button class="btn modal-confirm" style="flex:1">${confirmBtnText}</button><button class="btn modal-cancel" style="flex:1">${cancelBtnText}</button></div>`;
+            dialog.innerHTML = contentHtml;
             document.body.appendChild(overlay); document.body.appendChild(dialog);
-            currentOverlay = overlay;
-            currentDialog = dialog;
+            currentModalOverlay = overlay;
+            currentModalDialog = dialog;
             const close = () => { closeCurrentModal(); };
-            dialog.querySelector('.modal-confirm')?.addEventListener('click', () => { if(onConfirm) onConfirm(dialog); close(); });
-            dialog.querySelector('.modal-cancel')?.addEventListener('click', () => { if(onCancel) onCancel(); close(); });
+            dialog.querySelector('.modal-confirm')?.addEventListener('click', () => { 
+                if(onConfirm) onConfirm(dialog); 
+                if(closeOnConfirm) close(); 
+            });
+            dialog.querySelector('.modal-cancel')?.addEventListener('click', () => { 
+                if(onCancel) onCancel(); 
+                close(); 
+            });
             return dialog;
         }
         
-        function showAlert(msg, onClose = null) {
-            const overlay = document.createElement('div'); overlay.className = 'overlay';
-            const dialog = document.createElement('div'); dialog.className = 'modal-dialog';
-            dialog.innerHTML = `<p style="margin-bottom:16px; word-break:break-word;">${escapeHtml(msg)}</p><div class="modal-buttons"><button class="btn modal-confirm" style="width:100%">${t('close')}</button></div>`;
-            document.body.appendChild(overlay); document.body.appendChild(dialog);
-            currentOverlay = overlay;
-            currentDialog = dialog;
-            dialog.querySelector('.modal-confirm').onclick = () => { 
-                closeCurrentModal(); 
-                if(onClose) onClose(); 
-            };
+        function showAlert(msg, onClose) {
+            const content = `<p style="margin-bottom:16px; word-break:break-word;">${msg}</p><div class="modal-buttons"><button class="btn modal-confirm" style="width:100%">${t('close')}</button></div>`;
+            showModal(content, () => { if(onClose) onClose(); }, null);
         }
         
-        function showConfirm(msg, onConfirm, onCancel = null) {
-            const overlay = document.createElement('div'); overlay.className = 'overlay';
-            const dialog = document.createElement('div'); dialog.className = 'modal-dialog';
-            dialog.innerHTML = `<p style="margin-bottom:16px; word-break:break-word;">${escapeHtml(msg)}</p><div class="modal-buttons"><button class="btn modal-confirm" style="flex:1">${t('confirmExit')}</button><button class="btn modal-cancel" style="flex:1">${t('close')}</button></div>`;
-            document.body.appendChild(overlay); document.body.appendChild(dialog);
-            currentOverlay = overlay;
-            currentDialog = dialog;
-            dialog.querySelector('.modal-confirm').onclick = () => { closeCurrentModal(); if(onConfirm) onConfirm(); };
-            dialog.querySelector('.modal-cancel').onclick = () => { closeCurrentModal(); if(onCancel) onCancel(); };
+        function showConfirm(msg, onConfirm, onCancel) {
+            const content = `<p style="margin-bottom:16px; word-break:break-word;">${msg}</p><div class="modal-buttons"><button class="btn modal-confirm" style="flex:1">${t('confirmJoin')}</button><button class="btn modal-cancel" style="flex:1">${t('close')}</button></div>`;
+            showModal(content, () => { if(onConfirm) onConfirm(); }, () => { if(onCancel) onCancel(); });
         }
         
-        function showPrompt(title, defaultValue, onConfirm, placeholder = "") {
-            const content = `<h3>${escapeHtml(title)}</h3><input id="promptInput" type="text" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(defaultValue)}" style="width:100%; padding:8px; margin:8px 0;">`;
+        function showPrompt(title, placeholder, defaultValue, onConfirm, onCancel) {
+            const content = `<h3>${title}</h3><input id="promptInput" type="text" placeholder="${placeholder}" value="${escapeHtml(defaultValue || '')}" style="width:100%; padding:10px; margin:12px 0; border:1px solid #c8e6df;"><div class="modal-buttons"><button class="btn modal-confirm" style="flex:1">${t('confirmJoin')}</button><button class="btn modal-cancel" style="flex:1">${t('close')}</button></div>`;
             showModal(content, (dialog) => {
                 const val = dialog.querySelector('#promptInput').value.trim();
                 if(onConfirm) onConfirm(val);
-            }, null, t('confirmExit'), t('close'));
+            }, () => { if(onCancel) onCancel(); });
         }
         
         function showFingerprintDialog(title, fingerprint, showExport = false, onExport = null) {
-            const content = `<h3>${escapeHtml(title)}</h3><div class="full-hash" style="word-break:break-all; white-space:normal; font-family:monospace; font-size:0.7rem; background:#f9fbf9; padding:12px; max-height:200px; overflow-y:auto;">${escapeHtml(fingerprint)}</div><div class="modal-buttons">${showExport ? '<button class="btn" id="fpExportBtn" style="flex:1">📁 ' + t('exportFp') + '</button>' : ''}<button class="btn modal-cancel" style="flex:1">${t('close')}</button></div>`;
-            showModal(content, null, null);
+            const content = `<h3>${title}</h3><div class="full-hash" style="word-break:break-all; white-space:normal; font-family:monospace; font-size:0.7rem; background:#f9fbf9; padding:12px; max-height:200px; overflow-y:auto;">${escapeHtml(fingerprint)}</div><div class="modal-buttons">${showExport ? '<button class="btn" id="fpExportBtn" style="flex:1">📁 ' + t('exportFp') + '</button>' : ''}<button class="btn modal-cancel" style="flex:1">${t('close')}</button></div>`;
+            showModal(content, null, null, false);
             if (showExport) {
                 setTimeout(() => {
                     const exportBtn = document.getElementById('fpExportBtn');
-                    if(exportBtn) exportBtn.onclick = () => { if(onExport) onExport(); closeCurrentModal(); };
+                    if(exportBtn) exportBtn.onclick = () => { 
+                        closeCurrentModal();
+                        if(onExport) onExport(); 
+                    };
                 }, 10);
             }
         }
@@ -396,7 +388,6 @@
             renderMessages();
         }
         
-        // 指纹生成：完整SHA-256哈希（64位十六进制），短指纹取前5位
         async function generateFingerprint(seed) {
             const enc = new TextEncoder();
             const fullSeed = IMGJX_SALT + seed;
@@ -470,7 +461,6 @@
             }
         }
         
-        // 使用用户级非对称加密
         async function sendUserEncrypted(targetId, plaintext) {
             const peerKey = peerUserKeys.get(targetId);
             if (!peerKey) return null;
@@ -531,7 +521,6 @@
                 const peerPublicKey = await importPublicKeyJwk(publicKeyJwk);
                 const sharedKey = await deriveSharedSecret(myUserKeyPair.privateKey, peerPublicKey);
                 peerUserKeys.set(senderId, sharedKey);
-                console.log(`imgjx: User key exchanged with ${senderId.slice(0,8)}`);
             } catch(e) { console.warn("imgjx: Key exchange failed:", e); }
         }
         
@@ -690,10 +679,8 @@
         async function enterRoom(roomKey) {
             showLoading(t('derivingKey'));
             try {
-                // 先派生房间参数（使用 PBKDF2，快速）
                 const { appName, channelName, password, roomId } = await deriveRoomParamsFromKey(roomKey);
                 console.log(`imgjx: Room derived - ${roomId.slice(0,16)}...`);
-                // 再派生 AES 密钥
                 aesKey = await deriveAesKeyFromRoomKey(roomKey);
                 myUserKeyPair = await generateUserKeyPair();
                 const p2p = webconnect({ appName, channelName, connectPassword: password, iceConfiguration: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
@@ -775,7 +762,8 @@
                 <input id="nickInput" placeholder="${t('nicknamePlaceholder')}" value="User${Math.floor(Math.random()*1000)}">
                 <div style="display:flex; gap:8px; margin:8px 0;"><div class="file-input-wrapper" id="importFingerBtn" style="flex:1; text-align:center;">📁 ${t('importFingerprint')}</div><button id="clearFileBtn" class="clear-file-btn" style="display:none">${t('clearFile')}</button></div>
                 <input type="file" id="fingerFile" style="display:none" accept=".ip2pfinger">
-                <input type="password" id="importPasswordInput" placeholder="${t('importPassword')}">`;
+                <input type="password" id="importPasswordInput" placeholder="${t('importPassword')}">
+                <div class="modal-buttons"><button class="btn modal-confirm">${t('enterRoom')}</button><button class="btn modal-cancel">${t('close')}</button></div>`;
             showModal(content, async (dialog) => {
                 const nick = dialog.querySelector('#nickInput').value.trim() || "Anonymous";
                 const pwd = dialog.querySelector('#importPasswordInput').value;
@@ -796,7 +784,7 @@
                     hideLoading();
                     onConfirm(identity);
                 } catch(err) { hideLoading(); showAlert(t('importFailed') + ': ' + err.message); }
-            }, null, t('enterRoom'), t('close'));
+            }, null);
             setTimeout(() => {
                 const fpBtn = document.getElementById('importFingerBtn'); const fileInp = document.getElementById('fingerFile'); const clearBtn = document.getElementById('clearFileBtn');
                 if(fpBtn) fpBtn.onclick = () => document.getElementById('fingerFile')?.click();
@@ -816,7 +804,8 @@
             if (!myIdentity) return;
             const content = `<h3>${t('exportPassword')}</h3>
                 <input type="password" id="exportPwd1" placeholder="${t('exportPassword')}" style="width:100%; margin:8px 0;">
-                <input type="password" id="exportPwd2" placeholder="${t('confirmExportPassword')}" style="width:100%; margin:8px 0;">`;
+                <input type="password" id="exportPwd2" placeholder="${t('confirmExportPassword')}" style="width:100%; margin:8px 0;">
+                <div class="modal-buttons"><button class="btn modal-confirm">${t('exportFp')}</button><button class="btn modal-cancel">${t('close')}</button></div>`;
             showModal(content, async (dialog) => {
                 const pwd1 = dialog.querySelector('#exportPwd1').value;
                 const pwd2 = dialog.querySelector('#exportPwd2').value;
@@ -834,12 +823,12 @@
                     showAlert(t('exportSuccess'));
                 } catch(e) { showAlert('Export failed: ' + e.message); }
                 hideLoading();
-            }, null, t('exportFp'), t('close'));
+            });
         }
         
         async function handleCreateRoom() {
             if (isInRoom) {
-                showConfirm(t('confirmLeave'), async () => {
+                showConfirm(t('confirmExit'), async () => {
                     await leaveCurrentRoom();
                     showIdentityDialog(async (identity) => {
                         myIdentity = identity;
@@ -857,12 +846,12 @@
         }
         
         async function handleJoinWithKey() {
-            const content = `<h3>${t('joinPanelTitle')}</h3><textarea id="joinKeyInput" placeholder="粘贴128位房间密钥" rows="3" style="width:100%; padding:10px; font-family:monospace;"></textarea><div class="helper-text" style="margin:8px 0;">${t('keyHelper')}</div>`;
+            const content = `<h3>${t('joinPanelTitle')}</h3><textarea id="joinKeyInput" placeholder="粘贴128位房间密钥" rows="3" style="width:100%; padding:10px; font-family:monospace;"></textarea><div class="helper-text" style="margin:8px 0;">${t('keyHelper')}</div><div class="modal-buttons"><button class="btn modal-confirm">${t('confirmJoin')}</button><button class="btn modal-cancel">${t('back')}</button></div>`;
             showModal(content, async (dialog) => {
                 const roomKey = dialog.querySelector('#joinKeyInput').value.trim();
                 if (roomKey.length !== 128) { showAlert(t('invalidKey')); return; }
                 if (isInRoom) {
-                    showConfirm(t('confirmLeave'), async () => {
+                    showConfirm(t('confirmJoinLeave'), async () => {
                         await leaveCurrentRoom();
                         showIdentityDialog(async (identity) => {
                             myIdentity = identity;
@@ -875,7 +864,7 @@
                         await enterRoom(roomKey);
                     });
                 }
-            }, null, t('confirmJoin'), t('back'));
+            });
         }
         
         async function leaveCurrentRoom() {
@@ -917,7 +906,8 @@
             if (!currentP2P || !isInRoom || !aesKey) { showAlert("未连接房间"); return; }
             const content = `<h3>${t('privateMsgTitle')}</h3>
                 <input type="text" id="targetFingerprint" placeholder="${t('privateMsgPlaceholder')}" style="width:100%; padding:8px; margin:8px 0; font-family:monospace;">
-                <textarea id="privateMsgText" rows="3" placeholder="${t('privateMsgContent')}" style="width:100%; padding:8px; margin:8px 0;"></textarea>`;
+                <textarea id="privateMsgText" rows="3" placeholder="${t('privateMsgContent')}" style="width:100%; padding:8px; margin:8px 0;"></textarea>
+                <div class="modal-buttons"><button class="btn modal-confirm">${t('sendPrivate')}</button><button class="btn modal-cancel">${t('close')}</button></div>`;
             showModal(content, async (dialog) => {
                 const targetFp = dialog.querySelector('#targetFingerprint').value.trim().toUpperCase();
                 const msgText = dialog.querySelector('#privateMsgText').value.trim();
@@ -925,13 +915,17 @@
                 if (targetFp.length !== 64) { showAlert("指纹必须是64位十六进制字符串"); return; }
                 if (!msgText) { showAlert("请输入消息内容"); return; }
                 await sendChatMessage(msgText, false, null, targetFp);
-            }, null, t('sendPrivate'), t('close'));
+            });
         }
         
         // 事件绑定
         document.getElementById('homeCreateBtn').onclick = handleCreateRoom;
         document.getElementById('homeJoinBtn').onclick = handleJoinWithKey;
-        document.getElementById('leaveRoomBtn').onclick = () => { if(isInRoom) showConfirm(t('confirmLeave'), () => leaveCurrentRoom()); };
+        document.getElementById('leaveRoomBtn').onclick = () => {
+            if (isInRoom) {
+                showConfirm(t('confirmLeave'), () => leaveCurrentRoom());
+            }
+        };
         document.getElementById('sendMsgBtn').onclick = sendMessage;
         document.getElementById('privateMsgBtn').onclick = showPrivateMessageDialog;
         document.getElementById('messageInput').addEventListener('keydown', (e) => { if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage(); });
@@ -952,16 +946,15 @@
         }
         
         document.getElementById('myNicknameLabel').onclick = () => {
-            if (!myIdentity) return;
-            showPrompt(t('changeNickname'), myIdentity.nickname, (newNick) => {
-                if (newNick && newNick.trim() && newNick.trim() !== myIdentity.nickname) {
+            showPrompt(t('changeNickname'), t('newNickname'), myIdentity?.nickname || '', (newNick) => {
+                if (newNick && newNick.trim() && myIdentity && newNick.trim() !== myIdentity.nickname) {
                     const oldNick = myIdentity.nickname;
                     myIdentity.nickname = newNick.trim();
                     updateOnlineUI();
                     broadcastMyIdentity();
                     appendSystemMessage(`${oldNick} → ${myIdentity.nickname}`);
                 }
-            }, t('newNickname'));
+            });
         };
         document.getElementById('myFingerprintLabel').onclick = () => {
             if(!myIdentity) return;
