@@ -879,69 +879,29 @@
             });
         }
         
+        // 一键加入功能：只从URL读取房间密钥，不再传入昵称和指纹seed
         function handleUrlJoin() {
             const hash = window.location.hash.substring(1);
-            if (hash && hash.startsWith('#')) return;
             if (hash && hash.length > 0) {
-                let parts = hash.split('^');
-                let roomKey = parts[0];
-                let nickname = parts[1];
-                let fingerprintSeed = parts[2];
+                // 只取第一部分作为房间密钥，忽略^后面的任何内容
+                let roomKey = hash.split('^')[0];
                 if (roomKey && roomKey.length === 128) {
                     if (isInRoom) {
                         leaveCurrentRoom().then(() => {
-                            if (nickname || fingerprintSeed) {
-                                showIdentityDialog(async (identity) => {
-                                    if (nickname) identity.nickname = nickname;
-                                    if (fingerprintSeed && fingerprintSeed.length > 0) {
-                                        try {
-                                            const regenerated = await generateIdentity(nickname || identity.nickname, fingerprintSeed);
-                                            identity.seed = regenerated.seed;
-                                            identity.privateKey = regenerated.privateKey;
-                                            identity.publicKey = regenerated.publicKey;
-                                            identity.fingerprintShort = regenerated.fingerprintShort;
-                                            identity.fingerprintFull = regenerated.fingerprintFull;
-                                            identity.nickname = nickname || regenerated.nickname;
-                                        } catch(e) {}
-                                    }
-                                    myIdentity = identity;
-                                    await enterRoom(roomKey);
-                                });
-                            } else {
-                                showIdentityDialog(async (identity) => {
-                                    myIdentity = identity;
-                                    await enterRoom(roomKey);
-                                });
-                            }
+                            showIdentityDialog(async (identity) => {
+                                myIdentity = identity;
+                                await enterRoom(roomKey);
+                            });
                         });
                     } else {
-                        if (nickname || fingerprintSeed) {
-                            showIdentityDialog(async (identity) => {
-                                if (nickname) identity.nickname = nickname;
-                                if (fingerprintSeed && fingerprintSeed.length > 0) {
-                                    try {
-                                        const regenerated = await generateIdentity(nickname || identity.nickname, fingerprintSeed);
-                                        identity.seed = regenerated.seed;
-                                        identity.privateKey = regenerated.privateKey;
-                                        identity.publicKey = regenerated.publicKey;
-                                        identity.fingerprintShort = regenerated.fingerprintShort;
-                                        identity.fingerprintFull = regenerated.fingerprintFull;
-                                        identity.nickname = nickname || regenerated.nickname;
-                                    } catch(e) {}
-                                }
-                                myIdentity = identity;
-                                await enterRoom(roomKey);
-                            });
-                        } else {
-                            showIdentityDialog(async (identity) => {
-                                myIdentity = identity;
-                                await enterRoom(roomKey);
-                            });
-                        }
+                        showIdentityDialog(async (identity) => {
+                            myIdentity = identity;
+                            await enterRoom(roomKey);
+                        });
                     }
                     window.location.hash = '';
                 } else {
-                    if (roomKey) showAlert(t('invalidKey'));
+                    if (roomKey && roomKey.length > 0) showAlert(t('invalidKey'));
                 }
             }
         }
