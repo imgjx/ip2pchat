@@ -11,7 +11,7 @@
 
 这是一个基于 [webconnect.js](https://webconnect.js.org) 构建的纯前端P2P加密聊天演示应用。**单个HTML文件即可运行**，无需安装任何软件，所有逻辑均在浏览器中执行。
 
-> ℹ️ **网络依赖说明**：首次加载时需联网获取 CDN 资源（webconnect.js 库及 CSS 样式文件）。加载完成后，P2P 通信完全依赖 WebRTC 直连，无需中心服务器中转。
+> ℹ️ **网络依赖说明**：首次加载时需联网获取 CDN 资源（webconnect.js 库及 CSS 样式文件）。无需中心服务器中转。
 
 webconnect.js 是一个优秀的P2P连接库，它同时集成了 **WebTorrent、MQTT、Nostr** 三种去中心化网络协议作为信令通道，使浏览器之间可以通过WebRTC直接建立连接，无需中心服务器。
 
@@ -65,8 +65,6 @@ https://ip2pchat.top/#P=GZ&;bHwTD1?7jveNFQHz&ijDkFsanoqJ3AQM4dAzqXx=SxnF&@E&jQxh
 ```bash
 npx serve .
 ```
-
-> ⚠️ **注意**：由于浏览器安全策略，P2P 连接需要 HTTPS 环境（或 localhost）。在线版本已配置 HTTPS，本地运行建议使用 `npx serve` 等支持 HTTPS 的静态服务器，或直接使用 localhost 访问。
 
 ## 完整法律声明
 
