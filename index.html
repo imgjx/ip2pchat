@@ -363,21 +363,46 @@
             renderMessages();
         }
         
-        async function generateFingerprint(seed) {
-            const enc = new TextEncoder();
-            const fullSeed = IMGJX_SALT + seed;
-            const hashBuffer = await crypto.subtle.digest('SHA-256', enc.encode(fullSeed));
+        // 身份指纹直接由「签名公钥」派生：指纹与签名私钥同源（同一非对称密钥对），
+        // 这样「看到指纹 = 知道公钥」，验证签名即同时验证身份——非对称才有安全性。
+        // 旧版指纹来自一个与签名无关的随机 seed（SHA256(salt+seed)），两者毫无绑定，
+        // 导致任何人可以声称任意指纹却用无关私钥签名，「身份匹配」形同虚设。
+        async function computeIdentityFingerprint(publicKey) {
+            const jwk = await crypto.subtle.exportKey('jwk', publicKey);
+            // 仅取椭圆曲线点的确定性字段并规范化，确保同一公钥恒定得到同一指纹，
+            // 不受 JWK 字段顺序或非关键字段影响。
+            const canonical = JSON.stringify({ crv: jwk.crv, x: jwk.x, y: jwk.y });
+            const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(canonical));
             const hashArray = Array.from(new Uint8Array(hashBuffer));
             const fullHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
             const shortHash = fullHash.slice(0, 5);
             return { fullHash, shortHash };
         }
         
-        async function generateIdentity(nickname, importSeed = null) {
-            const seed = importSeed || (crypto.randomUUID() + Date.now() + crypto.getRandomValues(new Uint8Array(8)));
-            const { fullHash, shortHash } = await generateFingerprint(seed);
-            const keyPair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-            return { seed, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, fingerprintShort: shortHash, fingerprintFull: fullHash, nickname };
+        // 单一身份密钥对：签名消息用私钥，验证身份用公钥，指纹即公钥派生值。
+        // importPrivateJwk 非空时由导出的私钥恢复身份（指纹随之重算，无需存种子）。
+        async function generateIdentity(nickname, importPrivateJwk = null) {
+            let privateKey, publicKey;
+            if (importPrivateJwk) {
+                // 导入的是私钥 JWK（含 d）；公钥需由其导出后再导入（不能直接用私钥 JWK 当 verify 用）。
+                privateKey = await crypto.subtle.importKey(
+                    'jwk', importPrivateJwk,
+                    { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']
+                );
+                const pubJwk = await crypto.subtle.exportKey('jwk', privateKey);
+                publicKey = await crypto.subtle.importKey(
+                    'jwk', { kty: pubJwk.kty, crv: pubJwk.crv, x: pubJwk.x, y: pubJwk.y },
+                    { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
+                );
+            } else {
+                const keyPair = await crypto.subtle.generateKey(
+                    { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
+                );
+                privateKey = keyPair.privateKey;
+                publicKey = keyPair.publicKey;
+            }
+            const { fullHash, shortHash } = await computeIdentityFingerprint(publicKey);
+            return { privateKey, publicKey, fingerprintShort: shortHash, fingerprintFull: fullHash, nickname };
         }
         
         async function signMessage(privateKey, content) {
@@ -547,18 +572,27 @@
             
             if (data.type === 'identity') {
                 const pub = await crypto.subtle.importKey('jwk', data.publicKey, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']);
+                // 身份绑定：对方声明的指纹必须由其公钥真实派生；否则可能是冒名/伪造，
+                // 直接丢弃，避免把错误的身份指纹记到对端头上。
+                const realFp = await computeIdentityFingerprint(pub);
+                const claimedFull = (data.fingerprintFull || '').toUpperCase();
+                const claimedShort = (data.fingerprintShort || '').toUpperCase();
+                if (realFp.fullHash !== claimedFull && realFp.shortHash !== claimedShort) {
+                    console.warn(`imgjx: 身份指纹不匹配，丢弃来自 ${senderId.slice(0,8)} 的 identity`);
+                    return;
+                }
                 peerIdentities.set(senderId, { 
                     nickname: data.nickname, 
-                    fingerprintShort: data.fingerprintShort, 
-                    fingerprintFull: data.fingerprintFull || data.fingerprintShort, 
+                    fingerprintShort: realFp.shortHash, 
+                    fingerprintFull: realFp.fullHash, 
                     publicKey: pub 
                 });
                 const existing = onlinePeers.get(senderId);
                 if (!existing || existing.nickname === "加载中...") {
                     onlinePeers.set(senderId, { 
                         nickname: data.nickname, 
-                        fingerprintShort: data.fingerprintShort, 
-                        fingerprintFull: data.fingerprintFull || data.fingerprintShort 
+                        fingerprintShort: realFp.shortHash, 
+                        fingerprintFull: realFp.fullHash 
                     });
                     updateOnlineUI();
                     if (Date.now() >= silentUntil) appendSystemMessage(`${data.nickname} ${t('joined')}`);
@@ -594,6 +628,12 @@
                 }
                 const contentForVerify = { text: data.text, image: data.image, seq: data.seq, win: data.win, fromNick: data.fromNick, fromFp: data.fromFp };
                 if (!await verifySignature(peerInfo.publicKey, JSON.stringify(contentForVerify), data.signature)) {
+                    appendSystemMessage(t('sigInvalid'));
+                    return;
+                }
+                // 身份绑定：消息里声称的 fromFp 必须等于「验证签名所用的公钥」派生出的指纹，
+                // 否则即便签名有效，也可能是「用公钥 B 签名却声称指纹 A」的冒名/错位。
+                if ((data.fromFp || '').toUpperCase() !== peerInfo.fingerprintFull) {
                     appendSystemMessage(t('sigInvalid'));
                     return;
                 }
@@ -760,8 +800,9 @@
                         const imported = JSON.parse(contentText);
                         const encKey = await deriveKeyFromPassword(pwd, 'FingerprintSalt-V3', FINGERPRINT_ITERATIONS, true);
                         const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(imported.iv) }, encKey, new Uint8Array(imported.data));
-                        const decryptedSeed = decoder.decode(decrypted);
-                        identity = await generateIdentity(nick, decryptedSeed);
+                        // 新格式：解密后是身份私钥的 JWK（旧版导出的是 seed 字符串，无法解析为 JWK 会抛错）。
+                        const decryptedPrivateJwk = JSON.parse(decoder.decode(decrypted));
+                        identity = await generateIdentity(nick, decryptedPrivateJwk);
                     } else identity = await generateIdentity(nick);
                     hideLoading();
                     onConfirm(identity);
@@ -775,11 +816,14 @@
             }, 10);
         }
         
-        async function exportEncryptedFingerprint(identity, password) {
+        // 导出的是「身份私钥」（ECDSA 私钥的 JWK），而非旧的随机 seed。
+        // 私钥与签名/身份同源：导入后用它恢复身份，指纹由公钥重新派生，无需再存储种子。
+        async function exportEncryptedIdentity(identity, password) {
             const encKey = await deriveKeyFromPassword(password, 'FingerprintSalt-V3', FINGERPRINT_ITERATIONS, true);
             const iv = crypto.getRandomValues(new Uint8Array(12));
-            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, encKey, encoder.encode(identity.seed));
-            return JSON.stringify({ nickname: identity.nickname, fingerprintShort: identity.fingerprintShort, iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) });
+            const privateJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
+            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, encKey, encoder.encode(JSON.stringify(privateJwk)));
+            return JSON.stringify({ nickname: identity.nickname, iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) });
         }
         
         async function exportCurrentFingerprint() {
@@ -795,7 +839,7 @@
                 if (pwd1 !== pwd2) { showAlert(t('passwordMismatch')); return; }
                 showLoading(t('processing'));
                 try {
-                    const encrypted = await exportEncryptedFingerprint(myIdentity, pwd1);
+                    const encrypted = await exportEncryptedIdentity(myIdentity, pwd1);
                     const blob = new Blob([encrypted], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
